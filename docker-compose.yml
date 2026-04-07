@@ -1,0 +1,45 @@
+services:
+  gateway:
+    build:
+      context: ./src/gateway
+    container_name: gateway
+    ports:
+      - "8080:8080"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8081/orchestrate
+    volumes:
+      - ${USERPROFILE}/.aws:/root/.aws:ro
+    depends_on:
+      - orchestrator-agent
+
+  orchestrator-agent:
+    build:
+      context: ./src/orchestrator-agent
+    container_name: orchestrator-agent
+    ports:
+      - "8081:8081"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    depends_on:
+      - acct-mgmt-agent
+
+  acct-mgmt-agent:
+    build:
+      context: ./src/acct-mgmt-agent
+    container_name: acct-mgmt-agent
+    ports:
+      - "8082:8082"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+    volumes:
+      - ${USERPROFILE}/.aws:/root/.aws:ro
