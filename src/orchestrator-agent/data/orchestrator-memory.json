@@ -73,6 +73,63 @@
         "routed_to": "acct-mgmt-agent",
         "delivery_mode": "strands_a2a"
       }
+    },
+    {
+      "role": "user",
+      "text": "Please unlock my password because I am locked out.",
+      "metadata": {
+        "user": {
+          "sub": "personal-laptop-user",
+          "auth_mode": "okta-bypass"
+        }
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m unable to unlock your password directly. Please contact your IT administrator, provide your username, and they\u2019ll initiate the secure unlock process. This ensures proper identity verification. Once confirmed, we\u2019ll assist further. In production, this will integrate with your enterprise identity system for a seamless experience. Let me know if you need additional guidance.",
+      "metadata": {
+        "intent": "password_unlock",
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_a2a"
+      }
+    },
+    {
+      "role": "user",
+      "text": "Please unlock my password because I am locked out.",
+      "metadata": {
+        "user": {
+          "sub": "personal-laptop-user",
+          "auth_mode": "okta-bypass"
+        }
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m unable to unlock your password directly. Please contact your IT administrator and share your username with them. They will initiate the secure password unlock process through our identity management system. This ensures proper verification before any action is taken. In production, this will integrate with your enterprise identity provider for a seamless experience. Let me know if you need further assistance.",
+      "metadata": {
+        "intent": "password_unlock",
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_a2a"
+      }
+    },
+    {
+      "role": "user",
+      "text": "Please unlock my password because I am locked out.",
+      "metadata": {
+        "user": {
+          "sub": "personal-laptop-user",
+          "auth_mode": "okta-bypass"
+        }
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "I\u2019m unable to unlock your password directly. Please contact your IT administrator and share your username with them. They will initiate the secure unlock process through our identity management system, ensuring proper verification. In production, this will integrate with your enterprise identity provider for a seamless experience. Let me know if you need further assistance or guidance.",
+      "metadata": {
+        "intent": "password_unlock",
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_a2a"
+      }
     }
   ],
   "conv-a2a-check": [

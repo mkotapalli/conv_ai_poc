@@ -7,9 +7,8 @@ services:
       - "8080:8080"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
+      AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
       SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8081/orchestrate
     volumes:
       - ${USERPROFILE}/.aws:/root/.aws:ro
@@ -24,9 +23,10 @@ services:
       - "8081:8081"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
+      AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
+    volumes:
+      - ${USERPROFILE}/.aws:/root/.aws:ro
     depends_on:
       - acct-mgmt-agent
 
@@ -38,8 +38,7 @@ services:
       - "8082:8082"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
-      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
+      AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
+      AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
     volumes:
       - ${USERPROFILE}/.aws:/root/.aws:ro

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Any, Mapping
 
+import boto3
 from strands import Agent
 from strands.models import BedrockModel
 
@@ -33,10 +34,73 @@ class Settings:
     def __init__(self, path: Path):
         self.path = path
         self.properties = load_properties(path)
+        self.secret_overrides = self._load_secret_overrides()
+
+    @staticmethod
+    def _to_env_key(key: str) -> str:
+        return key.upper().replace(".", "_").replace("-", "_")
+
+    def _raw_lookup(self, key: str, default: str = "") -> str:
+        env_key = self._to_env_key(key)
+        return os.getenv(env_key, self.properties.get(key, default))
+
+    def _load_secret_overrides(self) -> dict[str, str]:
+        enabled_value = self._raw_lookup("aws.secretsmanager.enabled", "true").strip().lower()
+        if enabled_value not in {"1", "true", "yes", "y", "on"}:
+            return {}
+
+        secret_name = self._raw_lookup("aws.secretsmanager.secret_name", "").strip()
+        if not secret_name:
+            return {}
+
+        region = self._raw_lookup(
+            "aws.secretsmanager.region",
+            self._raw_lookup("aws.region", os.getenv("AWS_REGION", "us-east-1")),
+        ).strip() or "us-east-1"
+
+        try:
+            client = boto3.session.Session(region_name=region).client("secretsmanager", region_name=region)
+            response = client.get_secret_value(SecretId=secret_name)
+            secret_payload = json.loads(response.get("SecretString", "{}"))
+            if not isinstance(secret_payload, dict):
+                return {}
+            print(
+                f"Loaded secrets from AWS Secrets Manager '{secret_name}' with keys: {sorted(secret_payload.keys())}"
+            )
+        except Exception:
+            return {}
+
+        normalized = {str(key): "" if value is None else str(value) for key, value in secret_payload.items()}
+        aliases = {
+            "AWS_ACCESS_KEY_ID": ("AWS_ACCESS_KEY_ID", "aws_access_key_id", "accessKeyId", "access_key_id"),
+            "AWS_SECRET_ACCESS_KEY": (
+                "AWS_SECRET_ACCESS_KEY",
+                "aws_secret_access_key",
+                "secretAccessKey",
+                "secret_access_key",
+            ),
+            "AWS_SESSION_TOKEN": ("AWS_SESSION_TOKEN", "aws_session_token", "sessionToken", "session_token"),
+            "AWS_REGION": ("AWS_REGION", "aws_region", "region"),
+            "AWS_DEFAULT_REGION": ("AWS_DEFAULT_REGION", "aws_default_region"),
+        }
+        for env_name, candidates in aliases.items():
+            value = next((normalized.get(candidate) for candidate in candidates if normalized.get(candidate)), "")
+            if value and not os.getenv(env_name):
+                os.environ[env_name] = value
+        return normalized
 
     def get(self, key: str, default: str = "") -> str:
-        env_key = key.upper().replace(".", "_").replace("-", "_")
-        return os.getenv(env_key, self.properties.get(key, default))
+        env_key = self._to_env_key(key)
+        if env_key in os.environ:
+            return os.environ[env_key]
+        if env_key in self.secret_overrides:
+            return self.secret_overrides[env_key]
+        if key in self.secret_overrides:
+            return self.secret_overrides[key]
+        lowered_env_key = env_key.lower()
+        if lowered_env_key in self.secret_overrides:
+            return self.secret_overrides[lowered_env_key]
+        return self.properties.get(key, default)
 
     def get_bool(self, key: str, default: bool = False) -> bool:
         value = self.get(key, str(default)).strip().lower()
@@ -115,16 +179,17 @@ class StrandsResponder:
         if self._agent is not None:
             return
 
-        model_id = self.settings.get(
-            "bedrock.model_id", "amazon.nova-2-lite-v1:0"
-        )
+        model_id = (
+            self.settings.get("bedrock.inference_profile_id")
+            or self.settings.get("bedrock.model_id", "amazon.nova-2-lite-v1:0")
+        ).strip()
         region = self.settings.get("aws.region", "us-east-1")
         try:
             model = BedrockModel(
                 model_id=model_id,
                 region_name=region,
                 temperature=0.2,
-                max_tokens=512,
+                max_tokens=self.settings.get_int("bedrock.max_tokens", 1024),
                 **self._guardrail_config(),
             )
             self._agent = Agent(name=self.name, model=model, system_prompt=self.system_prompt)

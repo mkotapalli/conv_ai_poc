@@ -20,7 +20,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--message",
-        default="Please unlock my account",
+        default="what can you do for me ?",
         help="User message to send to the gateway",
     )
     parser.add_argument(
