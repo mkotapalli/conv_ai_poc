@@ -1,7 +1,6 @@
 {
   "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
   "python.analysis.extraPaths": [
-    "./src/gateway",
     "./src/orchestrator-agent",
     "./src/acct-mgmt-agent"
   ]

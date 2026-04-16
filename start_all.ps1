@@ -1,12 +1,30 @@
-$awsRegion = if ($env:AWS_REGION) { $env:AWS_REGION } else { 'us-east-1' }
-$awsProfile = if ($env:AWS_PROFILE) { $env:AWS_PROFILE } else { 'default' }
+[CmdletBinding()]
+param(
+	[ValidateSet('company', 'personal')]
+	[string]$Account = 'company',
 
-$bootstrap = "`$env:AWS_REGION='$awsRegion'; `$env:AWS_PROFILE='$awsProfile';"
+	[string]$CompanyProfile = 'default',
+
+	[string]$PersonalProfile = 'personal',
+
+	[string]$Region = $(if ($env:AWS_REGION) { $env:AWS_REGION } else { 'us-east-1' })
+)
+
+$awsProfile = if ($Account -eq 'personal') { $PersonalProfile } else { $CompanyProfile }
+$env:AWS_PROFILE = $awsProfile
+$env:AWS_REGION = $Region
+
+$bootstrap = "`$env:AWS_REGION='$Region'; `$env:AWS_PROFILE='$awsProfile';"
 if ($env:AWS_ACCESS_KEY_ID) { $bootstrap += " `$env:AWS_ACCESS_KEY_ID='$($env:AWS_ACCESS_KEY_ID)';" }
 if ($env:AWS_SECRET_ACCESS_KEY) { $bootstrap += " `$env:AWS_SECRET_ACCESS_KEY='$($env:AWS_SECRET_ACCESS_KEY)';" }
 if ($env:AWS_SESSION_TOKEN) { $bootstrap += " `$env:AWS_SESSION_TOKEN='$($env:AWS_SESSION_TOKEN)';" }
 
-Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8080 --app-dir src/gateway"
+Write-Host "Starting local services with AWS account '$Account', profile '$awsProfile', region '$Region'." -ForegroundColor Cyan
+
 Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8081 --app-dir src/orchestrator-agent"
 Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8082 --app-dir src/acct-mgmt-agent"
-Write-Host "Started gateway, orchestrator-agent, and acct-mgmt-agent with AWS environment inheritance." -ForegroundColor Green
+Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8083 --app-dir src/acct-mgnt-mcp"
+
+Write-Host "Started orchestrator-agent, acct-mgmt-agent, and acct-mgnt-mcp (MCP server)." -ForegroundColor Green
+Write-Host "Use './start_all.ps1 -Account company' for company AWS or './start_all.ps1 -Account personal' for personal AWS." -ForegroundColor Green
+Write-Host "MCP Server: http://localhost:8083/health" -ForegroundColor Yellow

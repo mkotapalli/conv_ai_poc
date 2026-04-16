@@ -106,6 +106,12 @@ class Settings:
         value = self.get(key, str(default)).strip().lower()
         return value in {"1", "true", "yes", "y", "on"}
 
+    def get_int(self, key: str, default: int) -> int:
+        try:
+            return int(self.get(key, str(default)))
+        except ValueError:
+            return default
+
 
 class AgentCoreMemoryStore:
     def __init__(self, storage_path: str, provider: str = "local") -> None:
@@ -192,7 +198,15 @@ class StrandsResponder:
                 max_tokens=self.settings.get_int("bedrock.max_tokens", 1024),
                 **self._guardrail_config(),
             )
-            self._agent = Agent(name=self.name, model=model, system_prompt=self.system_prompt)
+            self._agent = Agent(
+                name=self.name,
+                description=self.settings.get(
+                    "app.description",
+                    "Account-management specialist for password reset and account unlock support.",
+                ),
+                model=model,
+                system_prompt=self.system_prompt,
+            )
             self.last_error = ""
         except Exception as exc:
             self._agent = None
@@ -233,6 +247,10 @@ class StrandsResponder:
             self._record_error(f"Failed to execute prompt with `{self.name}`", exc)
             return fallback
 
+    def get_agent(self) -> Agent | None:
+        self._build_agent()
+        return self._agent
+
 
 def validate_sigv4_headers(headers: Mapping[str, str], required: bool, expected_access_key: str = "") -> None:
     if not required:
@@ -245,6 +263,19 @@ def validate_sigv4_headers(headers: Mapping[str, str], required: bool, expected_
 
     if expected_access_key and f"Credential={expected_access_key}/" not in authorization:
         raise ValueError("The SigV4 access key is not trusted for this environment")
+
+
+def validate_a2a_header(headers: Mapping[str, str], header_name: str = "", expected_value: str = "") -> None:
+    normalized_name = header_name.strip().lower()
+    if not normalized_name:
+        return
+
+    received_value = headers.get(normalized_name, "")
+    if not received_value:
+        raise ValueError("Inbound request is missing A2A authentication header")
+
+    if expected_value and received_value != expected_value:
+        raise ValueError("Inbound request failed A2A authentication")
 
 
 class AccountManagementService:
@@ -262,12 +293,18 @@ class AccountManagementService:
             "status": "ok",
             "service": self.settings.get("app.name", "acct-mgmt-agent"),
             "memory_provider": self.memory.provider,
+            "memory_id": self.settings.get("memory.agentcore.memory_id", ""),
             "agent_last_error": self.agent.last_error,
             "guardrails_enabled": str(self.agent.guardrails_enabled()).lower(),
             "guardrail_id": self.settings.get("bedrock.guardrail_id", ""),
         }
 
     def validate_sigv4(self, headers: Mapping[str, str]) -> None:
+        validate_a2a_header(
+            headers,
+            header_name=self.settings.get("auth.a2a.required_header", ""),
+            expected_value=self.settings.get("auth.a2a.expected_value", ""),
+        )
         validate_sigv4_headers(
             headers,
             required=self.settings.get_bool("auth.sigv4.required_header", False),
@@ -292,6 +329,10 @@ class AccountManagementService:
         conversation_id = payload.get("conversation_id") or "default-conversation"
         intent = str(payload.get("intent", "general")).strip().lower()
         message = str(payload.get("message", "")).strip()
+        user_context = dict(payload.get("user_context") or {})
+        memory_id = self.settings.get("memory.agentcore.memory_id", "").strip()
+        if memory_id and "memory_id" not in user_context:
+            user_context["memory_id"] = memory_id
 
         self.memory.append(conversation_id, "user", message)
         fallback = self._fallback_answer(intent)
@@ -314,6 +355,7 @@ Reply as a corporate IT account-management assistant in under 100 words.
             "intent": intent,
             "answer": answer,
             "memory_provider": self.memory.provider,
+            "memory_id": user_context.get("memory_id", ""),
             "agent_last_error": self.agent.last_error,
             "guardrails_enabled": self.agent.guardrails_enabled(),
         }

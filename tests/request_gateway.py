@@ -7,11 +7,11 @@ import requests
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Send a test request to the AgentCore POC gateway.")
+    parser = argparse.ArgumentParser(description="Send a test request to the orchestrator service.")
     parser.add_argument(
         "--url",
-        default="http://localhost:8080/chat",
-        help="Gateway chat endpoint URL (default: http://localhost:8080/chat)",
+        default="http://localhost:8081/orchestrate",
+        help="Orchestrator endpoint URL (default: http://localhost:8081/orchestrate)",
     )
     parser.add_argument(
         "--conversation-id",
@@ -21,7 +21,7 @@ def main() -> None:
     parser.add_argument(
         "--message",
         default="what can you do for me ?",
-        help="User message to send to the gateway",
+        help="User message to send to the orchestrator",
     )
     parser.add_argument(
         "--token",
@@ -32,11 +32,13 @@ def main() -> None:
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {args.token}",
+        "Authorization": f"AWS4-HMAC-SHA256 {args.token}",
+        "x-amz-date": "20260404T000000Z",
     }
     payload = {
         "conversation_id": args.conversation_id,
         "message": args.message,
+        "user_context": {},
     }
 
     response = requests.post(args.url, headers=headers, json=payload, timeout=30)

@@ -22,11 +22,9 @@ def load_module(module_name: str, file_path: Path):
     return module
 
 
-gateway_module = load_module("gateway_main", ROOT / "src" / "gateway" / "main.py")
 orchestrator_module = load_module("orchestrator_main", ROOT / "src" / "orchestrator-agent" / "main.py")
 account_module = load_module("acct_mgmt_main", ROOT / "src" / "acct-mgmt-agent" / "main.py")
 
-gateway_client = TestClient(gateway_module.app)
 orchestrator_client = TestClient(orchestrator_module.app)
 account_client = TestClient(account_module.app)
 
@@ -51,16 +49,16 @@ def fake_account_call(payload):
     return response.json()
 
 
-gateway_module.SERVICE.forward_to_orchestrator = fake_orchestrator_call
 orchestrator_module.SERVICE.call_account_agent = fake_account_call
 
-response = gateway_client.post(
-    "/chat",
+response = orchestrator_client.post(
+    "/orchestrate",
     json={
         "conversation_id": "conv-smoke-1",
         "message": "Please unlock my password because I am locked out.",
+        "user_context": {"subject": "local-smoke"},
     },
-    headers={"Authorization": "Bearer local-dev-token"},
+    headers={"authorization": "AWS4-HMAC-SHA256 local-test", "x-amz-date": "20260404T000000Z"},
 )
 
 print(f"status={response.status_code}")

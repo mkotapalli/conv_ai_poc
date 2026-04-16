@@ -1,20 +1,4 @@
 services:
-  gateway:
-    build:
-      context: ./src/gateway
-    container_name: gateway
-    ports:
-      - "8080:8080"
-    environment:
-      AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
-      AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
-      SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8081/orchestrate
-    volumes:
-      - ${USERPROFILE}/.aws:/root/.aws:ro
-    depends_on:
-      - orchestrator-agent
-
   orchestrator-agent:
     build:
       context: ./src/orchestrator-agent
@@ -42,3 +26,19 @@ services:
       AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
     volumes:
       - ${USERPROFILE}/.aws:/root/.aws:ro
+
+  acct-mgnt-mcp:
+    build:
+      context: ./src/acct-mgnt-mcp
+    container_name: acct-mgnt-mcp
+    ports:
+      - "8083:8083"
+    environment:
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
+      AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
+      SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8081/orchestrate
+    volumes:
+      - ${USERPROFILE}/.aws:/root/.aws:ro
+    depends_on:
+      - orchestrator-agent

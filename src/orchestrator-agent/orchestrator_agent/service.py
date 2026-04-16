@@ -4,11 +4,22 @@ import json
 import logging
 import os
 import re
+import asyncio
 import uuid
 from pathlib import Path
 from typing import Any, Mapping
 
 import boto3
+import httpx
+from a2a.client import A2ACardResolver, A2AClient, create_text_message_object
+from a2a.types import (
+    JSONRPCErrorResponse,
+    Message,
+    MessageSendParams,
+    SendMessageRequest,
+    Task,
+    TextPart,
+)
 from strands import Agent
 from strands.models import BedrockModel
 
@@ -30,14 +41,6 @@ def load_properties(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         properties[key.strip()] = value.strip()
     return properties
-
-
-def resolve_path(path_value: str, base_path: Path) -> Path:
-    candidate = Path(path_value)
-    if not candidate.is_absolute():
-        candidate = (base_path / candidate).resolve()
-    return candidate
-
 
 class Settings:
     def __init__(self, path: Path):
@@ -297,125 +300,113 @@ def validate_sigv4_headers(headers: Mapping[str, str], required: bool, expected_
         raise ValueError("The SigV4 access key is not trusted for this environment")
 
 
-class StrandsA2ADelegate:
-    def __init__(self, settings: Settings, orchestrator_prompt: str) -> None:
+class AccountAgentRemoteA2ADelegate:
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.last_error = ""
-        self.tool_name = self.settings.get("service.account_agent.tool_name", "acct_mgmt_agent")
-        self.account_prompt = self._load_account_prompt()
-        self.account_settings = self._load_account_settings()
-        self.account_responder = StrandsResponder(self.account_settings, self.account_prompt, "acct-mgmt-agent")
-        router_prompt = (
-            f"{orchestrator_prompt}\n\n"
-            "When the user needs password reset or password unlock help, delegate to the "
-            f"`{self.tool_name}` tool before you reply. Keep the final answer short and enterprise-safe."
-        )
-        self.router_responder = StrandsResponder(settings, router_prompt, "orchestrator-a2a-router")
-        self._router_agent: Agent | None = None
 
     def mode(self) -> str:
         return self.settings.get("service.account_agent.invoke_mode", "strands_a2a").strip().lower()
 
     def enabled(self) -> bool:
-        return self.mode() == "strands_a2a"
+        return self.mode() in {"a2a", "strands_multiagent_a2a"}
 
-    def _load_account_settings(self) -> Settings:
-        default_path = SERVICE_ROOT.parent / "acct-mgmt-agent" / "config" / "application.properties"
-        configured_path = self.settings.get("service.account_agent.config_path", str(default_path))
-        resolved_path = resolve_path(configured_path, SERVICE_ROOT)
-        if resolved_path.exists():
-            return Settings(resolved_path)
-        return self.settings
+    def endpoint(self) -> str:
+        return self.settings.get("service.account_agent.a2a_url", "http://localhost:8082/a2a").strip().rstrip("/")
 
-    def _load_account_prompt(self) -> str:
-        default_path = SERVICE_ROOT.parent / "acct-mgmt-agent" / "prompts" / "system_prompt.txt"
-        configured_path = self.settings.get("service.account_agent.prompt_path", str(default_path))
-        resolved_path = resolve_path(configured_path, SERVICE_ROOT)
-        if resolved_path.exists():
-            return resolved_path.read_text(encoding="utf-8").strip()
-        return (
-            "You are the account-management support agent for a corporate conversation AI solution on AWS. "
-            "Help with password reset and password unlock requests, and do not claim backend success unless confirmed."
+    @staticmethod
+    def _extract_text_from_parts(parts: list[Any] | None) -> str:
+        texts: list[str] = []
+        for part in parts or []:
+            if isinstance(part, TextPart):
+                if part.text:
+                    texts.append(part.text)
+                continue
+            text = getattr(part, "text", None)
+            if text:
+                texts.append(str(text))
+        return "\n".join(texts).strip()
+
+    def _extract_text_from_result(self, result: Message | Task) -> str:
+        if isinstance(result, Message):
+            return self._extract_text_from_parts(result.parts)
+
+        if isinstance(result, Task):
+            status_message = getattr(result.status, "message", None)
+            if isinstance(status_message, Message):
+                text = self._extract_text_from_parts(status_message.parts)
+                if text:
+                    return text
+
+            for artifact in result.artifacts or []:
+                text = self._extract_text_from_parts(getattr(artifact, "parts", None))
+                if text:
+                    return text
+
+        return ""
+
+    async def _invoke_async(self, payload: dict[str, Any]) -> dict[str, Any]:
+        timeout_seconds = self.settings.get_int("http.timeout.seconds", 20)
+        user_context = payload.get("user_context") or {}
+        request_text = (
+            "Use this request to assist with account-management support.\n\n"
+            f"Intent: {payload.get('intent', 'general')}\n"
+            f"Conversation ID: {payload.get('conversation_id', '')}\n"
+            f"User context: {json.dumps(user_context, default=str)}\n"
+            f"User message: {payload.get('message', '')}\n"
+            "Respond in concise, corporate-safe plain text."
         )
 
-    def _build_router_agent(self) -> None:
-        if self._router_agent is not None:
-            return
+        async with httpx.AsyncClient(timeout=timeout_seconds) as http_client:
+            resolver = A2ACardResolver(http_client, base_url=self.endpoint())
+            card = await resolver.get_agent_card()
+            client = A2AClient(http_client, agent_card=card)
+            request = SendMessageRequest(
+                id=str(uuid.uuid4()),
+                params=MessageSendParams(
+                    message=create_text_message_object(content=request_text),
+                    metadata={
+                        "intent": payload.get("intent", "general"),
+                        "conversation_id": payload.get("conversation_id", ""),
+                        "user_context": user_context,
+                    },
+                ),
+            )
+            response = await client.send_message(request)
 
-        account_agent = self.account_responder.create_agent(
-            description="Specialist agent for password reset and password unlock requests.",
-            force_new=True,
-        )
-        if account_agent is None:
-            self.last_error = self.account_responder.last_error or "The account-management agent could not be created."
-            return
+        root = response.root
+        if isinstance(root, JSONRPCErrorResponse):
+            raise RuntimeError(f"A2A JSON-RPC error: {root.error}")
 
-        account_tool = account_agent.as_tool(
-            name=self.tool_name,
-            description=(
-                "Invoke the account-management agent for employee password reset or password unlock issues."
-            ),
-            preserve_context=True,
-        )
-        self._router_agent = self.router_responder.create_agent(
-            description="Coordinates the handoff from the orchestrator to specialist support agents.",
-            tools=[account_tool],
-            force_new=True,
-        )
-        if self._router_agent is None:
-            self.last_error = self.router_responder.last_error or "The Strands A2A router agent could not be created."
-        else:
-            self.last_error = ""
+        text = self._extract_text_from_result(root.result)
+        if not text:
+            text = "The account-management A2A agent returned an empty response."
+
+        return {
+            "status": "ok",
+            "answer": text,
+            "delivery_mode": "strands_multiagent_a2a",
+            "a2a_endpoint": self.endpoint(),
+        }
 
     def invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
         if not self.enabled():
-            return {"status": "skipped", "delivery_mode": "strands_a2a_required"}
-
-        self._build_router_agent()
-        intent = str(payload.get("intent", "general"))
-        message = str(payload.get("message", "")).strip()
-        user_context = payload.get("user_context") or {}
-        fallback = (
-            f"POC A2A response: your `{intent}` request has been handed to the account-management agent. "
-            "In production, this would continue through the secured identity workflow."
-        )
-        prompt = f"""
-Use Strands A2A handoff for this request.
-
-Intent: {intent}
-Conversation ID: {payload.get("conversation_id", "")}
-User context: {json.dumps(user_context, default=str)}
-User message: {message}
-
-Always call the `{self.tool_name}` tool exactly once for password reset or password unlock requests,
-then return the final user-facing answer in plain text only.
-""".strip()
-
-        if self._router_agent is None:
-            answer = self.account_responder.ask_text(prompt, fallback)
-            error_detail = self.last_error or self.account_responder.last_error or "The Strands A2A router agent is unavailable."
-            return {
-                "status": "ok",
-                "answer": answer,
-                "delivery_mode": "strands_a2a_fallback",
-                "a2a_error": error_detail,
-            }
+            return {"status": "skipped", "delivery_mode": "strands_multiagent_a2a_required"}
 
         try:
-            result = self._router_agent(prompt)
-            stop_reason = getattr(result, "stop_reason", "")
-            if stop_reason in {"guardrail_intervened", "content_filtered"}:
-                answer = self.account_responder._block_message(fallback)
-            else:
-                answer = StrandsResponder._extract_text(result) or fallback
-            return {"status": "ok", "answer": answer, "delivery_mode": "strands_a2a"}
+            result = asyncio.run(self._invoke_async(payload))
+            self.last_error = ""
+            return result
         except Exception as exc:
-            self.last_error = f"Failed to execute the Strands A2A router: {exc.__class__.__name__}: {exc}"
+            self.last_error = f"Failed to invoke remote A2A account agent: {exc.__class__.__name__}: {exc}"
             LOGGER.exception(self.last_error)
             return {
                 "status": "degraded",
-                "answer": f"{fallback} Detail: {exc}",
-                "delivery_mode": "strands_a2a_error",
+                "delivery_mode": "strands_multiagent_a2a_error",
+                "answer": (
+                    "The remote account-management A2A agent could not be reached. "
+                    f"Detail: {exc}"
+                ),
                 "a2a_error": self.last_error,
             }
 
@@ -429,16 +420,17 @@ class OrchestratorService:
             provider=self.settings.get("memory.provider", "local"),
         )
         self.agent = StrandsResponder(self.settings, self.system_prompt, "orchestrator-agent")
-        self.a2a_delegate = StrandsA2ADelegate(self.settings, self.system_prompt)
+        self.remote_a2a_delegate = AccountAgentRemoteA2ADelegate(self.settings)
 
     def health(self) -> dict[str, str]:
         return {
             "status": "ok",
             "service": self.settings.get("app.name", "orchestrator-agent"),
             "memory_provider": self.memory.provider,
-            "a2a_tool": self.settings.get("service.account_agent.tool_name", "acct_mgmt_agent"),
-            "account_agent_invoke_mode": self.a2a_delegate.mode(),
-            "a2a_last_error": self.a2a_delegate.last_error,
+            "memory_id": self.settings.get("memory.agentcore.memory_id", ""),
+            "account_agent_invoke_mode": self.remote_a2a_delegate.mode(),
+            "account_agent_a2a_url": self.remote_a2a_delegate.endpoint(),
+            "account_agent_remote_a2a_last_error": self.remote_a2a_delegate.last_error,
             "agent_last_error": self.agent.last_error,
             "guardrails_enabled": str(self.agent.guardrails_enabled()).lower(),
             "guardrail_id": self.settings.get("bedrock.guardrail_id", ""),
@@ -513,23 +505,25 @@ Reply in under 80 words and keep the answer appropriate for a corporate IT suppo
         return self.agent.ask_text(prompt, fallback)
 
     def call_account_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
-        a2a_response = self.a2a_delegate.invoke(payload)
-        if a2a_response.get("status") == "ok":
-            return a2a_response
-
+        remote_a2a_response = self.remote_a2a_delegate.invoke(payload)
+        if remote_a2a_response.get("status") == "ok":
+            return remote_a2a_response
         return {
             "status": "degraded",
-            "delivery_mode": "strands_a2a_required",
+            "delivery_mode": "strands_multiagent_a2a_required",
             "answer": (
-                "The account-management agent could not be reached through the mandatory Strands A2A path. "
-                f"Detail: {a2a_response.get('answer', 'No downstream response returned.')}"
+                "The account-management runtime could not be reached through the configured Strands multi-agent A2A path. "
+                f"Detail: {remote_a2a_response.get('answer', 'No downstream response returned.')}"
             ),
         }
 
     def route_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         conversation_id = payload.get("conversation_id") or str(uuid.uuid4())
         message = str(payload.get("message", "")).strip()
-        user_context = payload.get("user_context") or {}
+        user_context = dict(payload.get("user_context") or {})
+        memory_id = self.settings.get("memory.agentcore.memory_id", "").strip()
+        if memory_id and "memory_id" not in user_context:
+            user_context["memory_id"] = memory_id
 
         self.memory.append(conversation_id, "user", message, metadata={"user": user_context})
         intent_info = self.identify_intent(message, conversation_id)
@@ -547,7 +541,7 @@ Reply in under 80 words and keep the answer appropriate for a corporate IT suppo
             )
             answer = downstream_response.get("answer", "The account-management agent returned no response.")
             routed_to = "acct-mgmt-agent"
-            delivery_mode = downstream_response.get("delivery_mode", self.a2a_delegate.mode())
+            delivery_mode = downstream_response.get("delivery_mode", self.remote_a2a_delegate.mode())
         else:
             answer = self.general_response(message, conversation_id)
             routed_to = "orchestrator-agent"
@@ -568,6 +562,7 @@ Reply in under 80 words and keep the answer appropriate for a corporate IT suppo
             "delivery_mode": delivery_mode,
             "answer": answer,
             "memory_provider": self.memory.provider,
+            "memory_id": user_context.get("memory_id", ""),
             "guardrails_enabled": self.agent.guardrails_enabled(),
             "user": user_context.get("sub", "anonymous"),
         }

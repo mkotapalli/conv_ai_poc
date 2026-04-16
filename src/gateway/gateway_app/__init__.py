@@ -1,1 +1,0 @@
-"""Gateway application package."""

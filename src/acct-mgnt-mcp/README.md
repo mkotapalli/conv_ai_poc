@@ -1,0 +1,224 @@
+# Account Management MCP Server
+
+The MCP (Model Context Protocol) server bridges AWS AgentCore Gateway to the orchestrator agent by exposing a standards-based MCP tool surface over HTTP. It uses the Python `mcp` server implementation, keeps the existing SigV4 bridge to `orchestrator-agent`, and is packaged so it can run as an ARM64 AgentCore Runtime container.
+
+## Architecture
+
+```
+AWS AgentCore Gateway
+         ↓
+   acct-mgnt-mcp (MCP Server - Port 8083)
+         ↓
+   orchestrator-agent (Port 8081)
+         ↓
+   acct-mgmt-agent (Port 8082)
+```
+
+## Capabilities
+
+### Resources
+- **account://password-reset** - Password reset request handling
+- **account://account-unlock** - Account unlock request handling
+
+### Tools
+- **orchestrator_invoke** - Forward a user message from AgentCore Gateway to `orchestrator-agent`
+
+## Configuration
+
+See [config/application.properties](config/application.properties) for all settings:
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `server.port` | 8083 | MCP server listen port |
+| `service.orchestrator.url` | `http://localhost:8081/orchestrate` | Orchestrator endpoint |
+| `service.orchestrator.auth.sigv4` | true | Sign outbound orchestrator calls with SigV4 |
+| `auth.sigv4.required_header` | false | Require inbound SigV4 from the caller |
+| `service.agentcore.runtime.mcp_path` | `/mcp` | AgentCore Runtime MCP endpoint path |
+| `aws.secretsmanager.enabled` | true | Load AWS credentials from Secrets Manager |
+
+## Running Locally
+
+### Docker
+```bash
+docker compose up -d acct-mgnt-mcp
+```
+
+### Direct Python
+```bash
+cd src/acct-mgnt-mcp
+python -m uvicorn main:app --host 0.0.0.0 --port 8083
+```
+
+## Testing
+
+### Health Check
+```bash
+curl http://localhost:8083/health
+```
+
+### MCP Endpoints
+
+**List Resources:**
+```bash
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "resources/list",
+    "id": 1
+  }'
+```
+
+**List Tools:**
+```bash
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/list",
+    "id": 2
+  }'
+```
+
+**Invoke Orchestrator:**
+```bash
+curl -X POST http://localhost:8083/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "orchestrator_invoke",
+      "arguments": {
+        "message": "I forgot my password",
+        "conversation_id": "mcp-test-1",
+        "user_context": {
+          "user_id": "test-user"
+        }
+      }
+    },
+    "id": 3
+  }'
+```
+
+Or use the automated test script:
+```bash
+python tests/test_mcp_server.py
+```
+
+## AWS Integration
+
+### SigV4 Authentication
+
+Outbound calls to `orchestrator-agent` can be signed with SigV4. Credentials are loaded via AWS Secrets Manager at startup from the secret `bcbs-dev-convai-secrets`. Inbound SigV4 validation can also be enforced by setting `auth.sigv4.required_header=true` and `auth.sigv4.trusted_access_key_id=<expected access key>`.
+
+### Secrets Manager Configuration
+
+The secret must contain:
+```json
+{
+  "AWS_ACCESS_KEY_ID": "AKIA...",
+  "AWS_SECRET_ACCESS_KEY": "...",
+  "AWS_REGION": "us-east-1"
+}
+```
+
+## Building ARM64
+
+The Dockerfile is multi-arch safe and the repository build script already forces `linux/arm64`, which is the architecture expected by AgentCore Runtime deployments.
+
+Build only this image locally with Buildx:
+
+```bash
+docker buildx build --platform linux/arm64 -t acct-mgnt-mcp:arm64 ./src/acct-mgnt-mcp
+```
+
+Or push it with the repository helper script:
+
+```powershell
+./build_and_push_to_ecr.ps1 -ImageTag v1
+```
+
+## Registering In AgentCore Runtime
+
+`acct-mgnt-mcp` is now exposed as a standard MCP HTTP server at `/mcp`, which matches the AgentCore Runtime `serverProtocol=MCP` registration model.
+
+1. Push the ARM64 image to ECR.
+2. Create the AgentCore Runtime with `protocolConfiguration.serverProtocol` set to `MCP`.
+3. Create a runtime endpoint for the runtime.
+4. Register that runtime endpoint from AgentCore Gateway as an MCP tool server.
+
+Example CLI payload for runtime creation:
+
+```json
+{
+  "agentRuntimeName": "acct-mgnt-mcp",
+  "description": "MCP bridge from AgentCore Gateway to orchestrator-agent",
+  "agentRuntimeArtifact": {
+    "containerConfiguration": {
+      "containerUri": "834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc:acct-mgnt-mcp-v1"
+    }
+  },
+  "roleArn": "arn:aws:iam::834458830002:role/bedrock-agentcore-runtime-role",
+  "networkConfiguration": {
+    "networkMode": "VPC",
+    "networkModeConfig": {
+      "securityGroups": ["sg-0123456789abcdef0"],
+      "subnets": ["subnet-0123456789abcdef0", "subnet-abcdef01234567890"]
+    }
+  },
+  "protocolConfiguration": {
+    "serverProtocol": "MCP"
+  },
+  "environmentVariables": {
+    "AWS_REGION": "us-east-1",
+    "SERVICE_ORCHESTRATOR_URL": "http://orchestrator-agent.internal/orchestrate",
+    "SERVICE_ORCHESTRATOR_AUTH_SIGV4": "true",
+    "SERVICE_AGENTCORE_RUNTIME_MCP_PATH": "/mcp"
+  }
+}
+```
+
+Create the runtime:
+
+```bash
+aws bedrock-agentcore-control create-agent-runtime --cli-input-json file://runtime-create.json
+```
+
+Then create an endpoint:
+
+```json
+{
+  "agentRuntimeId": "runtime-id-from-create",
+  "name": "acct-mgnt-mcp-endpoint"
+}
+```
+
+```bash
+aws bedrock-agentcore-control create-agent-runtime-endpoint --cli-input-json file://runtime-endpoint.json
+```
+
+After the endpoint is ready, use its AgentCore Runtime URL in AgentCore Gateway as the MCP integration URL. The gateway should target the runtime base URL and the runtime will expose the MCP transport on `/mcp`.
+
+For direct HTTP callers, include `Accept: application/json, text/event-stream` on MCP requests because the standard streamable HTTP transport negotiates between JSON and SSE responses.
+
+## Connecting to AgentCore Gateway
+
+To register this MCP server as a tool server in AgentCore Gateway:
+
+1. Deploy the container as an AgentCore Runtime and create its runtime endpoint.
+2. In AgentCore Gateway, create a new MCP integration that points at the runtime endpoint URL.
+3. Configure the integration to use the runtime MCP path `/mcp`.
+4. Expose the `orchestrator_invoke` tool to the gateway workflow.
+5. If the runtime or downstream orchestrator requires signed traffic, enable SigV4 in the Gateway integration and in `service.orchestrator.auth.sigv4`.
+
+## Files
+
+- `main.py` - ASGI entry point for the MCP runtime
+- `acct_mgnt_mcp/service.py` - FastMCP server and orchestrator bridge
+- `config/application.properties` - Configuration
+- `requirements.txt` - Python dependencies
+- `Dockerfile` - Container image definition

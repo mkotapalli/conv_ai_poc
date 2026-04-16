@@ -6,9 +6,9 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src" / "gateway"))
+sys.path.insert(0, str(REPO_ROOT / "src" / "orchestrator-agent"))
 
-from gateway_app import service as gateway_service
+from orchestrator_agent import service as orchestrator_service
 
 
 class _FakeSecretsClient:
@@ -51,13 +51,13 @@ def test_settings_load_aws_credentials_from_secrets_manager(tmp_path, monkeypatc
     monkeypatch.delenv("AWS_ACCESS_KEY_ID", raising=False)
     monkeypatch.delenv("AWS_SECRET_ACCESS_KEY", raising=False)
     monkeypatch.delenv("AWS_SESSION_TOKEN", raising=False)
-    monkeypatch.setattr(gateway_service.boto3.session, "Session", _FakeSession)
+    monkeypatch.setattr(orchestrator_service.boto3.session, "Session", _FakeSession)
 
-    gateway_service.Settings(config_path)
+    orchestrator_service.Settings(config_path)
 
-    assert gateway_service.os.environ["AWS_ACCESS_KEY_ID"] == "secret-access-key-id"
-    assert gateway_service.os.environ["AWS_SECRET_ACCESS_KEY"] == "secret-access-key"
-    assert gateway_service.os.environ["AWS_SESSION_TOKEN"] == "secret-session-token"
+    assert orchestrator_service.os.environ["AWS_ACCESS_KEY_ID"] == "secret-access-key-id"
+    assert orchestrator_service.os.environ["AWS_SECRET_ACCESS_KEY"] == "secret-access-key"
+    assert orchestrator_service.os.environ["AWS_SESSION_TOKEN"] == "secret-session-token"
 
 
 def test_orchestrator_prefers_inference_profile_id(tmp_path, monkeypatch) -> None:
