@@ -20,6 +20,13 @@ Client
 .\build_and_push_to_ecr.ps1 -ImageTag latest
 ```
 
+Linux bastion host:
+
+```bash
+chmod +x ./build_and_push_to_ecr.sh
+./build_and_push_to_ecr.sh --image-tag latest
+```
+
 Required runtime images:
 
 - `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc:orchestrator-agent-latest`

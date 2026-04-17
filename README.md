@@ -53,4 +53,5 @@ c:/projects/gen_agent_ai/.venv/Scripts/python.exe smoke_test.py
 - Update each `config/application.properties` file with your **AWS region**, **Bedrock model ID**, **Okta issuer/audience/JWKS**, **Guardrail ID/version**, and service URLs.
 - Set `bedrock.guardrail.enabled=true` plus `bedrock.guardrail_id=<your-guardrail-id>` in both agent properties files to enable **AWS Guardrails**.
 - For production, place `orchestrator-agent` and `acct-mgnt-mcp` behind API Gateway / ALB and enforce IAM-authenticated SigV4 on the AWS side.
+- From a Linux bastion host, build and push images with `./build_and_push_to_ecr.sh --image-tag latest`. Run `chmod +x build_and_push_to_ecr.sh` once if needed.
 - The memory abstraction is intentionally **POC-safe**: it runs locally today and can be swapped to a managed AgentCore memory provider later.
