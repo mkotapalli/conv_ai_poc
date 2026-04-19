@@ -4,14 +4,14 @@ This repository contains a **3-service FastAPI proof of concept** for an AWS-hos
 
 - `src/orchestrator-agent` – uses **Strands SDK** plus **Bedrock model configuration** to classify intent and route password requests, using **mandatory Strands A2A handoff** to the account-management agent.
 - `src/acct-mgmt-agent` – uses **Strands SDK** plus **Bedrock model configuration** to answer password reset/unlock prompts.
-- `src/acct-mgnt-mcp` – **MCP (Model Context Protocol) server** that bridges AWS AgentCore Gateway to the orchestrator, enabling tool/resource invocation with SigV4 authentication.
+- `src/acct-mgnt-mcp` – **MCP (Model Context Protocol) server** that bridges AWS AgentCore Gateway to the orchestrator, enabling tool/resource invocation.
 
 ## Key design points
 
 - **FastAPI everywhere**
 - **Properties-file driven configuration** for easy environment promotion
 - **Mandatory Strands A2A orchestration** from `orchestrator-agent` to `acct-mgmt-agent`
-- **SigV4 protection** for orchestrator/account-agent and MCP-facing service traffic
+- **UI/Gateway-side IAM authentication** with no service-level SigV4 enforcement in these modules
 - **AgentCore-style memory abstraction** with local fallback for laptop development
 - **Dedicated Dockerfile and requirements** per component for independent deployment
 
@@ -52,6 +52,6 @@ c:/projects/gen_agent_ai/.venv/Scripts/python.exe smoke_test.py
 
 - Update each `config/application.properties` file with your **AWS region**, **Bedrock model ID**, **Okta issuer/audience/JWKS**, **Guardrail ID/version**, and service URLs.
 - Set `bedrock.guardrail.enabled=true` plus `bedrock.guardrail_id=<your-guardrail-id>` in both agent properties files to enable **AWS Guardrails**.
-- For production, place `orchestrator-agent` and `acct-mgnt-mcp` behind API Gateway / ALB and enforce IAM-authenticated SigV4 on the AWS side.
+- For production, place `orchestrator-agent` and `acct-mgnt-mcp` behind API Gateway / ALB and enforce IAM authentication at the UI/gateway layer.
 - From a Linux bastion host, build and push images with `./build_and_push_to_ecr.sh --image-tag latest`. Run `chmod +x build_and_push_to_ecr.sh` once if needed.
 - The memory abstraction is intentionally **POC-safe**: it runs locally today and can be swapped to a managed AgentCore memory provider later.

@@ -1,6 +1,6 @@
 # Account Management MCP Server
 
-The MCP (Model Context Protocol) server bridges AWS AgentCore Gateway to the orchestrator agent by exposing a standards-based MCP tool surface over HTTP. It uses the Python `mcp` server implementation, keeps the existing SigV4 bridge to `orchestrator-agent`, and is packaged so it can run as an ARM64 AgentCore Runtime container.
+The MCP (Model Context Protocol) server bridges AWS AgentCore Gateway to the orchestrator agent by exposing a standards-based MCP tool surface over HTTP. It uses the Python `mcp` server implementation and is packaged so it can run as an ARM64 AgentCore Runtime container.
 
 ## Architecture
 
@@ -31,8 +31,6 @@ See [config/application.properties](config/application.properties) for all setti
 |---------|---------|---------|
 | `server.port` | 8083 | MCP server listen port |
 | `service.orchestrator.url` | `http://localhost:8081/orchestrate` | Orchestrator endpoint |
-| `service.orchestrator.auth.sigv4` | true | Sign outbound orchestrator calls with SigV4 |
-| `auth.sigv4.required_header` | false | Require inbound SigV4 from the caller |
 | `service.agentcore.runtime.mcp_path` | `/mcp` | AgentCore Runtime MCP endpoint path |
 | `aws.secretsmanager.enabled` | true | Load AWS credentials from Secrets Manager |
 
@@ -111,9 +109,7 @@ python tests/test_mcp_server.py
 
 ## AWS Integration
 
-### SigV4 Authentication
-
-Outbound calls to `orchestrator-agent` can be signed with SigV4. Credentials are loaded via AWS Secrets Manager at startup from the secret `bcbs-dev-convai-secrets`. Inbound SigV4 validation can also be enforced by setting `auth.sigv4.required_header=true` and `auth.sigv4.trusted_access_key_id=<expected access key>`.
+Authentication is expected to be enforced at the UI/Gateway IAM layer. This service does not perform service-level SigV4 validation or SigV4 request signing.
 
 ### Secrets Manager Configuration
 
@@ -176,7 +172,6 @@ Example CLI payload for runtime creation:
   "environmentVariables": {
     "AWS_REGION": "us-east-1",
     "SERVICE_ORCHESTRATOR_URL": "http://orchestrator-agent.internal/orchestrate",
-    "SERVICE_ORCHESTRATOR_AUTH_SIGV4": "true",
     "SERVICE_AGENTCORE_RUNTIME_MCP_PATH": "/mcp"
   }
 }
@@ -213,7 +208,6 @@ To register this MCP server as a tool server in AgentCore Gateway:
 2. In AgentCore Gateway, create a new MCP integration that points at the runtime endpoint URL.
 3. Configure the integration to use the runtime MCP path `/mcp`.
 4. Expose the `orchestrator_invoke` tool to the gateway workflow.
-5. If the runtime or downstream orchestrator requires signed traffic, enable SigV4 in the Gateway integration and in `service.orchestrator.auth.sigv4`.
 
 ## Files
 

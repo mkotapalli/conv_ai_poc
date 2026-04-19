@@ -23,17 +23,10 @@ def main() -> None:
         default="what can you do for me ?",
         help="User message to send to the orchestrator",
     )
-    parser.add_argument(
-        "--token",
-        default="local-dev-token",
-        help="Bearer token to send in the Authorization header",
-    )
     args = parser.parse_args()
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"AWS4-HMAC-SHA256 {args.token}",
-        "x-amz-date": "20260404T000000Z",
     }
     payload = {
         "conversation_id": args.conversation_id,

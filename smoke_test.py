@@ -33,7 +33,6 @@ def fake_orchestrator_call(payload, user_context):
     response = orchestrator_client.post(
         "/orchestrate",
         json={**payload, "user_context": user_context},
-        headers={"authorization": "AWS4-HMAC-SHA256 local-test", "x-amz-date": "20260404T000000Z"},
     )
     response.raise_for_status()
     return response.json()
@@ -43,7 +42,6 @@ def fake_account_call(payload):
     response = account_client.post(
         "/assist",
         json=payload,
-        headers={"authorization": "AWS4-HMAC-SHA256 local-test", "x-amz-date": "20260404T000000Z"},
     )
     response.raise_for_status()
     return response.json()
@@ -58,7 +56,6 @@ response = orchestrator_client.post(
         "message": "Please unlock my password because I am locked out.",
         "user_context": {"subject": "local-smoke"},
     },
-    headers={"authorization": "AWS4-HMAC-SHA256 local-test", "x-amz-date": "20260404T000000Z"},
 )
 
 print(f"status={response.status_code}")

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
 from orchestrator_agent.service import OrchestratorService
@@ -33,10 +33,5 @@ def health() -> dict[str, str]:
 
 
 @app.post("/orchestrate")
-def orchestrate(payload: RequestEnvelope, request: Request) -> dict:
-    try:
-        SERVICE.validate_sigv4(request.headers)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
+def orchestrate(payload: RequestEnvelope) -> dict:
     return SERVICE.route_request(payload.model_dump())

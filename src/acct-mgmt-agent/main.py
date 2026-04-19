@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from a2a.types import AgentSkill
 from strands.multiagent.a2a import A2AServer
@@ -74,10 +74,5 @@ def health() -> dict[str, str]:
 
 
 @app.post("/assist")
-def assist(payload: AgentRequest, request: Request) -> dict:
-    try:
-        SERVICE.validate_sigv4(request.headers)
-    except ValueError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-
+def assist(payload: AgentRequest) -> dict:
     return SERVICE.handle_request(payload.model_dump())

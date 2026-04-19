@@ -5,12 +5,10 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import boto3
 import requests
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -120,25 +118,10 @@ class Settings:
             return default
 
 
-def validate_sigv4_headers(headers: Mapping[str, str], required: bool, expected_access_key: str = "") -> None:
-    if not required:
-        return
-
-    authorization = headers.get("authorization", "")
-    amz_date = headers.get("x-amz-date", "")
-    if not authorization.startswith("AWS4-HMAC-SHA256") or not amz_date:
-        raise ValueError("Inbound request is missing SigV4 authentication headers")
-
-    if expected_access_key and f"Credential={expected_access_key}/" not in authorization:
-        raise ValueError("The SigV4 access key is not trusted for this environment")
-
-
 class OrchestratorBridge:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.orchestrator_url = self.settings.get("service.orchestrator.url")
-        self.region = self.settings.get("aws.region", "us-east-1")
-        self.service_name = self.settings.get("auth.sigv4.service", "execute-api")
 
     def health(self) -> dict[str, Any]:
         return {
@@ -147,32 +130,8 @@ class OrchestratorBridge:
             "mcp_path": self.settings.get("service.agentcore.runtime.mcp_path", "/mcp"),
             "health_path": self.settings.get("service.agentcore.runtime.health_path", "/health"),
             "orchestrator_url": self.orchestrator_url,
-            "orchestrator_sigv4": self.settings.get_bool("service.orchestrator.auth.sigv4", True),
             "runtime_protocol": self.settings.get("service.agentcore.runtime.protocol", "MCP"),
         }
-
-    def validate_sigv4(self, headers: Mapping[str, str]) -> None:
-        validate_sigv4_headers(
-            headers,
-            required=self.settings.get_bool("auth.sigv4.required_header", False),
-            expected_access_key=self.settings.get("auth.sigv4.trusted_access_key_id", ""),
-        )
-
-    def _signed_headers(self, payload_text: str) -> dict[str, str]:
-        headers: dict[str, str] = {"content-type": "application/json"}
-        if not self.settings.get_bool("service.orchestrator.auth.sigv4", True):
-            return headers
-
-        session = boto3.Session(region_name=self.region)
-        credentials = session.get_credentials()
-        if credentials is None:
-            if self.settings.get_bool("development.allow_unsigned_local", True):
-                return headers
-            raise RuntimeError("SigV4 signing is enabled but no AWS credentials were found.")
-
-        request = AWSRequest(method="POST", url=self.orchestrator_url, data=payload_text, headers=headers)
-        SigV4Auth(credentials.get_frozen_credentials(), self.service_name, self.region).add_auth(request)
-        return dict(request.headers.items())
 
     def invoke(self, *, message: str, conversation_id: str | None, user_context: dict[str, Any] | None) -> dict[str, Any]:
         if not self.orchestrator_url:
@@ -188,7 +147,7 @@ class OrchestratorBridge:
             "user_context": user_context or {},
         }
         payload_text = json.dumps(payload)
-        headers = self._signed_headers(payload_text)
+        headers = {"content-type": "application/json"}
         timeout_seconds = self.settings.get_int("http.timeout.seconds", 30)
 
         response = requests.post(
@@ -310,12 +269,8 @@ async def root(_: Request) -> JSONResponse:
 
 
 @MCP_SERVER.custom_route("/health", methods=["GET"], include_in_schema=False)
-async def health(request: Request) -> JSONResponse:
-    try:
-        BRIDGE.validate_sigv4(request.headers)
-        return JSONResponse(BRIDGE.health())
-    except ValueError as exc:
-        return JSONResponse({"status": "unauthorized", "detail": str(exc)}, status_code=401)
+async def health(_: Request) -> JSONResponse:
+    return JSONResponse(BRIDGE.health())
 
 
 app = MCP_SERVER.streamable_http_app()

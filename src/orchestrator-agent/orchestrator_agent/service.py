@@ -7,7 +7,7 @@ import re
 import asyncio
 import uuid
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import boto3
 import httpx
@@ -287,19 +287,6 @@ class StrandsResponder:
         return default
 
 
-def validate_sigv4_headers(headers: Mapping[str, str], required: bool, expected_access_key: str = "") -> None:
-    if not required:
-        return
-
-    authorization = headers.get("authorization", "")
-    amz_date = headers.get("x-amz-date", "")
-    if not authorization.startswith("AWS4-HMAC-SHA256") or not amz_date:
-        raise ValueError("Inbound request is missing SigV4 authentication headers")
-
-    if expected_access_key and f"Credential={expected_access_key}/" not in authorization:
-        raise ValueError("The SigV4 access key is not trusted for this environment")
-
-
 class AccountAgentRemoteA2ADelegate:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -435,13 +422,6 @@ class OrchestratorService:
             "guardrails_enabled": str(self.agent.guardrails_enabled()).lower(),
             "guardrail_id": self.settings.get("bedrock.guardrail_id", ""),
         }
-
-    def validate_sigv4(self, headers: Mapping[str, str]) -> None:
-        validate_sigv4_headers(
-            headers,
-            required=self.settings.get_bool("auth.sigv4.required_header", False),
-            expected_access_key=self.settings.get("auth.sigv4.trusted_access_key_id", ""),
-        )
 
     @staticmethod
     def _fallback_intent(message: str) -> str:
