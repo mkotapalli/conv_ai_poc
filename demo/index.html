@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentCore Account Management - Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #2563eb;
+            --success: #16a34a;
+            --warning: #ea580c;
+            --info: #0891b2;
+        }
+
+        body {
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+            color: #e2e8f0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+        }
+
+        .navbar {
+            background: rgba(15, 23, 42, 0.8) !important;
+            border-bottom: 2px solid var(--primary);
+            backdrop-filter: blur(10px);
+        }
+
+        .navbar-brand {
+            font-weight: 700;
+            color: var(--primary) !important;
+            font-size: 1.5rem;
+        }
+
+        .container-main {
+            max-width: 1400px;
+            margin-top: 2rem;
+        }
+
+        /* Chat Section */
+        .chat-container {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 12px;
+            height: 600px;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(10px);
+        }
+
+        .chat-header {
+            background: rgba(37, 99, 235, 0.1);
+            border-bottom: 1px solid rgba(37, 99, 235, 0.3);
+            padding: 1rem;
+            border-radius: 12px 12px 0 0;
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message {
+            padding: 1rem;
+            border-radius: 8px;
+            max-width: 85%;
+            word-wrap: break-word;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: var(--primary);
+            color: white;
+            border-radius: 12px 12px 0 12px;
+        }
+
+        .message.assistant {
+            align-self: flex-start;
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px 12px 12px 0;
+            color: #a7f3d0;
+        }
+
+        .message.system {
+            align-self: center;
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #bfdbfe;
+            font-size: 0.875rem;
+            text-align: center;
+            max-width: 80%;
+        }
+
+        .chat-input-group {
+            border-top: 1px solid rgba(148, 163, 184, 0.2);
+            padding: 1rem;
+            background: rgba(15, 23, 42, 0.4);
+        }
+
+        .chat-input-group input {
+            background: rgba(71, 85, 105, 0.3);
+            border: 1px solid rgba(148, 163, 184, 0.3);
+            color: #e2e8f0;
+            border-radius: 8px;
+        }
+
+        .chat-input-group input::placeholder {
+            color: rgba(148, 163, 184, 0.5);
+        }
+
+        .chat-input-group input:focus {
+            background: rgba(71, 85, 105, 0.5);
+            border-color: var(--primary);
+            color: #e2e8f0;
+            box-shadow: 0 0 0 0.2rem rgba(37, 99, 235, 0.25);
+        }
+
+        /* Chain Summary */
+        .chain-summary {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .chain-step {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: rgba(71, 85, 105, 0.2);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid var(--primary);
+        }
+
+        .chain-step.completed {
+            border-left-color: var(--success);
+            background: rgba(22, 163, 74, 0.1);
+        }
+
+        .chain-step.pending {
+            border-left-color: var(--warning);
+            background: rgba(234, 88, 12, 0.1);
+        }
+
+        .chain-step.processing {
+            border-left-color: var(--info);
+            background: rgba(8, 145, 178, 0.1);
+        }
+
+        .step-icon {
+            font-size: 1.5rem;
+            width: 40px;
+            text-align: center;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-label {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .step-detail {
+            font-size: 0.875rem;
+            color: rgba(226, 232, 240, 0.7);
+        }
+
+        .badge-status {
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .badge-warning {
+            background: var(--warning);
+            color: white;
+        }
+
+        .badge-info {
+            background: var(--info);
+            color: white;
+        }
+
+        /* Details Panel */
+        .details-panel {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+            margin-top: 1rem;
+        }
+
+        .details-title {
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .json-viewer {
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 6px;
+            padding: 1rem;
+            font-family: 'Courier New', monospace;
+            font-size: 0.75rem;
+            color: #86efac;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .stat-card {
+            background: rgba(71, 85, 105, 0.2);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: rgba(226, 232, 240, 0.6);
+            margin-top: 0.5rem;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(37, 99, 235, 0.3);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            border: none;
+            border-radius: 8px;
+        }
+
+        .btn-primary:hover {
+            background: #1d4ed8;
+            color: white;
+        }
+
+        .btn-primary:disabled {
+            background: rgba(37, 99, 235, 0.5);
+        }
+
+        .conversation-history {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 12px;
+            padding: 1.5rem;
+            backdrop-filter: blur(10px);
+        }
+
+        .history-item {
+            padding: 0.75rem;
+            border-left: 3px solid var(--primary);
+            background: rgba(71, 85, 105, 0.1);
+            margin-bottom: 0.75rem;
+            border-radius: 4px;
+        }
+
+        .history-user {
+            color: var(--primary);
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+
+        .history-assistant {
+            color: #a7f3d0;
+            font-size: 0.875rem;
+        }
+
+        .tabs-container {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+        }
+
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: rgba(226, 232, 240, 0.6);
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .tab-btn.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-btn:hover {
+            color: #e2e8f0;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .alert-info {
+            background: rgba(8, 145, 178, 0.1);
+            border: 1px solid rgba(8, 145, 178, 0.3);
+            color: #a5f3fc;
+            border-radius: 8px;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(71, 85, 105, 0.1);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(37, 99, 235, 0.5);
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(37, 99, 235, 0.7);
+        }
+
+        /* Scenario Buttons */
+        .scenario-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 0.75rem 1rem;
+            background: rgba(15, 23, 42, 0.4);
+            border-top: 1px solid rgba(148, 163, 184, 0.15);
+        }
+
+        .scenario-btn {
+            background: rgba(37, 99, 235, 0.15);
+            border: 1px solid rgba(37, 99, 235, 0.4);
+            color: #93c5fd;
+            border-radius: 20px;
+            padding: 0.35rem 0.9rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .scenario-btn:hover {
+            background: rgba(37, 99, 235, 0.35);
+            border-color: var(--primary);
+            color: white;
+            transform: translateY(-1px);
+        }
+
+        .scenario-btn:active {
+            transform: translateY(0);
+        }
+
+        /* Pipeline Timeline */
+        .timeline-panel {
+            background: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 12px;
+            padding: 1.25rem;
+            backdrop-filter: blur(10px);
+            margin-top: 1rem;
+        }
+
+        .timeline {
+            position: relative;
+            padding-left: 1.5rem;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            left: 0.45rem;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: rgba(37, 99, 235, 0.3);
+        }
+
+        .tl-item {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .tl-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .tl-dot {
+            position: absolute;
+            left: -1.18rem;
+            top: 0.3rem;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: rgba(71, 85, 105, 0.6);
+            border: 2px solid rgba(148, 163, 184, 0.4);
+            transition: all 0.4s ease;
+        }
+
+        .tl-dot.done {
+            background: var(--success);
+            border-color: var(--success);
+            box-shadow: 0 0 6px rgba(22,163,74,0.6);
+        }
+
+        .tl-dot.active {
+            background: var(--info);
+            border-color: var(--info);
+            box-shadow: 0 0 6px rgba(8,145,178,0.7);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+
+        .tl-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #cbd5e1;
+        }
+
+        .tl-time {
+            font-size: 0.7rem;
+            color: rgba(148, 163, 184, 0.6);
+            font-family: 'Courier New', monospace;
+        }
+
+        .tl-elapsed {
+            font-size: 0.7rem;
+            color: #86efac;
+            margin-left: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand">
+                <i class="bi bi-robot"></i> AgentCore Account Management
+            </span>
+            <span class="text-muted me-3">
+                <small>Demo • Local Testing</small>
+            </span>
+            <button class="btn btn-sm" id="clearBtn" onclick="clearHistory()"
+                style="background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.4);color:#fca5a5;border-radius:8px;">
+                <i class="bi bi-trash3"></i> Clear History
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <div class="container-main">
+        <div class="row g-4">
+            <!-- Left Side: Stats, Execution Chain, and Details -->
+            <div class="col-lg-3">
+                <!-- Statistics -->
+                <div class="row mb-3">
+                    <div class="col-6">
+                        <div class="stat-card">
+                            <div class="stat-value" id="messageCount">0</div>
+                            <div class="stat-label">Messages Sent</div>
+                        </div>
+                    </div>
+                    <div class="col-6">
+                        <div class="stat-card">
+                            <div class="stat-value" id="avgLatency">0ms</div>
+                            <div class="stat-label">Avg Response</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pipeline Timeline -->
+                <div class="timeline-panel">
+                    <h6 class="mb-3" style="font-size:0.85rem;">
+                        <i class="bi bi-stopwatch"></i> Pipeline Timeline
+                    </h6>
+                    <div class="timeline">
+                        <div class="tl-item" id="tl-mcp">
+                            <div class="tl-dot" id="tl-dot-mcp"></div>
+                            <div class="tl-label">MCP Server</div>
+                            <div class="tl-time" id="tl-time-mcp">—</div>
+                        </div>
+                        <div class="tl-item" id="tl-orch">
+                            <div class="tl-dot" id="tl-dot-orch"></div>
+                            <div class="tl-label">Orchestrator Agent</div>
+                            <div class="tl-time" id="tl-time-orch">—</div>
+                        </div>
+                        <div class="tl-item" id="tl-acct">
+                            <div class="tl-dot" id="tl-dot-acct"></div>
+                            <div class="tl-label">Account Agent</div>
+                            <div class="tl-time" id="tl-time-acct">—</div>
+                        </div>
+                        <div class="tl-item" id="tl-resp">
+                            <div class="tl-dot" id="tl-dot-resp"></div>
+                            <div class="tl-label">Response Delivered</div>
+                            <div class="tl-time" id="tl-time-resp">—</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chain Execution Summary -->
+                <div class="chain-summary">
+                    <h6 class="mb-3">
+                        <i class="bi bi-diagram-3"></i> Execution Chain
+                    </h6>
+
+                    <div class="chain-step" id="step1">
+                        <div class="step-icon"><i class="bi bi-circle-fill"></i></div>
+                        <div class="step-content">
+                            <div class="step-label">MCP Server</div>
+                            <div class="step-detail">Port 8083</div>
+                        </div>
+                        <span class="badge badge-status badge-success">Ready</span>
+                    </div>
+
+                    <div class="chain-step" id="step2">
+                        <div class="step-icon"><i class="bi bi-arrow-down"></i></div>
+                        <div class="step-content">
+                            <div class="step-label">Orchestrator Agent</div>
+                            <div class="step-detail">Intent Classification (Port 8081)</div>
+                        </div>
+                        <span class="badge badge-status badge-success" id="orchestratorStatus">Ready</span>
+                    </div>
+
+                    <div class="chain-step" id="step3">
+                        <div class="step-icon"><i class="bi bi-arrow-down"></i></div>
+                        <div class="step-content">
+                            <div class="step-label">Account Management Agent</div>
+                            <div class="step-detail">Response Generation (Port 8082)</div>
+                        </div>
+                        <span class="badge badge-status badge-success" id="acctStatus">Ready</span>
+                    </div>
+
+                    <div class="chain-step" id="step4">
+                        <div class="step-icon"><i class="bi bi-arrow-down"></i></div>
+                        <div class="step-content">
+                            <div class="step-label">Response to Client</div>
+                            <div class="step-detail">Full conversation context maintained</div>
+                        </div>
+                        <span class="badge badge-status" id="responseStatus">Idle</span>
+                    </div>
+                </div>
+
+                <!-- Details Tab -->
+                <div class="details-panel">
+                    <div class="tabs-container">
+                        <button class="tab-btn active" onclick="switchTab('intent')">
+                            <i class="bi bi-lightning"></i> Intent
+                        </button>
+                        <button class="tab-btn" onclick="switchTab('response')">
+                            <i class="bi bi-chat-left"></i> Response
+                        </button>
+                        <button class="tab-btn" onclick="switchTab('metadata')">
+                            <i class="bi bi-info-circle"></i> Metadata
+                        </button>
+                    </div>
+
+                    <div id="intent" class="tab-content active">
+                        <div class="details-title">
+                            <i class="bi bi-lightning-fill"></i> Intent Detection
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Detected Intent</div>
+                            <div class="stat-value" id="intentValue" style="font-size: 1.2rem; color: #fbbf24;">—</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Confidence Score</div>
+                            <div class="stat-value" id="confidenceValue" style="font-size: 1.2rem; color: #86efac;">—</div>
+                        </div>
+                    </div>
+
+                    <div id="response" class="tab-content">
+                        <div class="details-title">
+                            <i class="bi bi-chat-left-fill"></i> Latest Response
+                        </div>
+                        <div id="responseDetails" class="text-muted" style="font-size: 0.875rem; line-height: 1.6;">
+                            No response yet
+                        </div>
+                    </div>
+
+                    <div id="metadata" class="tab-content">
+                        <div class="details-title">
+                            <i class="bi bi-info-circle-fill"></i> Execution Metadata
+                        </div>
+                        <div class="json-viewer" id="metadataJson">{}</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle: Conversation History -->
+            <div class="col-lg-6">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h5 class="mb-0">
+                            <i class="bi bi-chat-dots"></i> Conversation History
+                        </h5>
+                        <small class="text-muted">Conversation ID: <span id="convId">demo-conv-1</span></small>
+                    </div>
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message system">
+                            <i class="bi bi-info-circle"></i> Start a conversation about password reset or account unlock
+                        </div>
+                    </div>
+                    <!-- Scenario quick-prompt buttons -->
+                    <div class="scenario-strip">
+                        <span style="font-size:0.75rem;color:rgba(148,163,184,0.6);align-self:center;margin-right:0.25rem;">Quick:</span>
+                        <button class="scenario-btn" onclick="useScenario('I forgot my password and need to reset it')"><i class="bi bi-key"></i> Forgot Password</button>
+                        <button class="scenario-btn" onclick="useScenario('My account is locked, can you help me unlock it?')"><i class="bi bi-lock"></i> Account Locked</button>
+                        <button class="scenario-btn" onclick="useScenario('What do I need to verify my identity?')"><i class="bi bi-shield-check"></i> Verify Identity</button>
+                        <button class="scenario-btn" onclick="useScenario('How do I reset my MFA authenticator?')"><i class="bi bi-phone"></i> Reset MFA</button>
+                        <button class="scenario-btn" onclick="useScenario('How long does an account unlock take?')"><i class="bi bi-clock"></i> Unlock ETA</button>
+                    </div>
+
+                    <div class="chat-input-group">
+                        <div class="input-group">
+                            <input type="text" class="form-control" id="messageInput" placeholder="Type your message or click a scenario above..." />
+                            <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()">
+                                <i class="bi bi-send"></i> Send
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Side: Message History -->
+            <div class="col-lg-3">
+                <div class="conversation-history">
+                    <h6 class="mb-3">
+                        <i class="bi bi-clock-history"></i> Message History
+                    </h6>
+                    <div id="historyContainer">
+                        <div class="text-muted text-center py-3">No messages yet</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const MCP_URL = "http://localhost:8083/mcp";
+        let conversationId = "demo-conv-1";
+        let messageCount = 0;
+        let latencies = [];
+        let lastResponse = null;
+
+        // Initialize
+        document.getElementById("messageInput").addEventListener("keypress", (e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+                sendMessage();
+            }
+        });
+
+        async function sendMessage() {
+            const input = document.getElementById("messageInput");
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Clear input
+            input.value = "";
+
+            // Add user message to chat
+            addMessage(message, "user");
+
+            // Update message count
+            messageCount++;
+            document.getElementById("messageCount").textContent = messageCount;
+
+            // Show loading
+            const loadingMsg = addMessage("Processing...", "system");
+
+            // Update chain status
+            updateChainStatus("processing");
+            resetTimeline();
+            const tlStart = Date.now();
+            activateTimelineStep('mcp');
+
+            try {
+                const startTime = Date.now();
+
+                // Prepare MCP request
+                const mcpRequest = {
+                    jsonrpc: "2.0",
+                    method: "tools/call",
+                    params: {
+                        name: "orchestrator_invoke",
+                        arguments: {
+                            message: message,
+                            conversation_id: conversationId,
+                            user_context: {
+                                user_id: "demo-user@company.com",
+                                subject: "demo"
+                            }
+                        }
+                    },
+                    id: 1
+                };
+
+                markTimelineStep('mcp', tlStart);
+                activateTimelineStep('orch');
+
+                // Send to MCP
+                const response = await fetch(MCP_URL, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream"
+                    },
+                    body: JSON.stringify(mcpRequest)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                markTimelineStep('orch', tlStart);
+                activateTimelineStep('acct');
+
+                // Parse response (handle SSE if needed)
+                let responseJson = null;
+                const responseText = await response.text();
+                markTimelineStep('acct', tlStart);
+                activateTimelineStep('resp');
+
+                // Try to extract JSON from SSE format
+                if (responseText.includes("data: ")) {
+                    const lines = responseText.split("\n");
+                    for (const line of lines) {
+                        if (line.startsWith("data: ")) {
+                            const dataStr = line.substring(6);
+                            try {
+                                responseJson = JSON.parse(dataStr);
+                                break;
+                            } catch (e) {
+                                // Continue looking
+                            }
+                        }
+                    }
+                } else {
+                    responseJson = JSON.parse(responseText);
+                }
+
+                // Calculate latency
+                const latency = Date.now() - startTime;
+                latencies.push(latency);
+                const avgLatency = Math.round(latencies.reduce((a, b) => a + b, 0) / latencies.length);
+                document.getElementById("avgLatency").textContent = `${avgLatency}ms`;
+
+                // Parse response
+                if (responseJson && responseJson.result && responseJson.result.structuredContent) {
+                    const content = responseJson.result.structuredContent;
+                    const orchResponse = content.orchestrator_response;
+
+                    if (orchResponse) {
+                        // Extract answer
+                        const answer = orchResponse.answer || "No response";
+                        addMessage(answer, "assistant");
+                        lastResponse = orchResponse;
+
+                        // Update intent and confidence
+                        document.getElementById("intentValue").textContent = orchResponse.intent || "—";
+                        document.getElementById("intentValue").style.color = "#fbbf24";
+
+                        const confidence = orchResponse.confidence ? `${(orchResponse.confidence * 100).toFixed(0)}%` : "—";
+                        document.getElementById("confidenceValue").textContent = confidence;
+                        document.getElementById("confidenceValue").style.color = "#86efac";
+
+                        // Update response details
+                        document.getElementById("responseDetails").innerHTML = `
+                            <strong>Intent:</strong> ${orchResponse.intent}<br>
+                            <strong>Routed To:</strong> ${orchResponse.routed_to}<br>
+                            <strong>Delivery Mode:</strong> ${orchResponse.delivery_mode}<br>
+                            <strong>Status:</strong> ${orchResponse.status}
+                        `;
+
+                        // Update metadata
+                        document.getElementById("metadataJson").textContent = JSON.stringify({
+                            status: content.status,
+                            conversation_id: content.conversation_id,
+                            delivery_mode: content.delivery_mode,
+                            orchestrator: {
+                                intent: orchResponse.intent,
+                                confidence: orchResponse.confidence,
+                                routed_to: orchResponse.routed_to,
+                                delivery_mode: orchResponse.delivery_mode
+                            },
+                            timestamp: new Date().toISOString(),
+                            latency_ms: latency
+                        }, null, 2);
+                    }
+                }
+
+                // Remove loading message
+                loadingMsg.remove();
+
+                markTimelineStep('resp', tlStart);
+
+                // Update chain status
+                updateChainStatus("completed");
+
+                // Update history
+                updateHistory();
+
+            } catch (error) {
+                console.error("Error:", error);
+                addMessage(`Error: ${error.message}`, "system");
+                updateChainStatus("error");
+            }
+        }
+
+        function addMessage(text, type) {
+            const container = document.getElementById("chatMessages");
+            const msgDiv = document.createElement("div");
+            msgDiv.className = `message ${type}`;
+            msgDiv.textContent = text;
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;
+            return msgDiv;
+        }
+
+        function updateChainStatus(status) {
+            const step4 = document.getElementById("responseStatus");
+            if (status === "processing") {
+                step4.innerHTML = '<span class="loading-spinner"></span> Processing';
+                step4.className = "badge badge-status badge-warning";
+            } else if (status === "completed") {
+                step4.textContent = "Completed";
+                step4.className = "badge badge-status badge-success";
+            } else if (status === "error") {
+                step4.textContent = "Error";
+                step4.className = "badge badge-status" ;
+                step4.style.background = "#dc2626";
+            }
+        }
+
+        function updateHistory() {
+            const container = document.getElementById("historyContainer");
+            if (messageCount === 0) return;
+
+            const userMessages = document.querySelectorAll(".message.user");
+            const assistantMessages = document.querySelectorAll(".message.assistant");
+
+            let html = "";
+            const maxItems = Math.min(userMessages.length, assistantMessages.length);
+
+            for (let i = 0; i < maxItems; i++) {
+                html += `
+                    <div class="history-item">
+                        <div class="history-user"><i class="bi bi-person-circle"></i> You</div>
+                        <div class="history-assistant">${userMessages[i].textContent}</div>
+                        <div style="margin-top: 0.5rem; color: #a7f3d0; font-size: 0.8rem;">
+                            <i class="bi bi-robot"></i> Bot:
+                        </div>
+                        <div class="history-assistant">${assistantMessages[i].textContent.substring(0, 80)}...</div>
+                    </div>
+                `;
+            }
+
+            container.innerHTML = html;
+        }
+
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
+            document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
+
+            // Show selected tab
+            document.getElementById(tabName).classList.add("active");
+            event.target.classList.add("active");
+        }
+
+        // Scenario quick-fill
+        function useScenario(text) {
+            document.getElementById("messageInput").value = text;
+            document.getElementById("messageInput").focus();
+        }
+
+        // Pipeline timeline helpers
+        const TL_STEPS = ['mcp', 'orch', 'acct', 'resp'];
+
+        function resetTimeline() {
+            TL_STEPS.forEach(s => {
+                document.getElementById(`tl-dot-${s}`).className = 'tl-dot';
+                document.getElementById(`tl-time-${s}`).innerHTML = '—';
+            });
+        }
+
+        function markTimelineStep(step, startEpoch) {
+            const dot = document.getElementById(`tl-dot-${step}`);
+            const timeEl = document.getElementById(`tl-time-${step}`);
+            const now = Date.now();
+            const elapsed = now - startEpoch;
+            const ts = new Date(now).toLocaleTimeString('en-US', {hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit', fractionalSecondDigits: 2});
+            dot.className = 'tl-dot done';
+            timeEl.innerHTML = `${ts} <span class="tl-elapsed">+${elapsed}ms</span>`;
+        }
+
+        function activateTimelineStep(step) {
+            const dot = document.getElementById(`tl-dot-${step}`);
+            dot.className = 'tl-dot active';
+        }
+
+        async function clearHistory() {
+            if (!confirm("Clear all conversation memory and reset the UI?")) return;
+            const btn = document.getElementById("clearBtn");
+            btn.disabled = true;
+            btn.innerHTML = '<span class="loading-spinner"></span> Clearing...';
+            try {
+                await fetch("http://localhost:8081/clear-memory", { method: "POST" });
+            } catch (e) {
+                // Orchestrator might not be reachable; still clear UI
+            }
+            // Reset UI state
+            document.getElementById("chatMessages").innerHTML =
+                '<div class="message system"><i class="bi bi-info-circle"></i> History cleared — start a new conversation</div>';
+            document.getElementById("historyContainer").innerHTML =
+                '<div class="text-muted text-center py-3">No messages yet</div>';
+            messageCount = 0;
+            latencies = [];
+            lastResponse = null;
+            document.getElementById("messageCount").textContent = "0";
+            document.getElementById("avgLatency").textContent = "0ms";
+            document.getElementById("intentValue").textContent = "\u2014";
+            document.getElementById("confidenceValue").textContent = "\u2014";
+            document.getElementById("responseDetails").innerHTML = "No response yet";
+            document.getElementById("metadataJson").textContent = "{}";
+            document.getElementById("responseStatus").textContent = "Idle";
+            document.getElementById("responseStatus").className = "badge badge-status";
+            document.getElementById("responseStatus").style.background = "";
+            resetTimeline();
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-trash3"></i> Clear History';
+        }
+
+        // Focus input on load
+        window.addEventListener("load", () => {
+            document.getElementById("messageInput").focus();
+        });
+    </script>
+</body>
+</html>

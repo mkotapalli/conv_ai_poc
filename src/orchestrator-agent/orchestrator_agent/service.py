@@ -11,6 +11,7 @@ from typing import Any
 
 import boto3
 import httpx
+import requests
 from a2a.client import A2ACardResolver, A2AClient, create_text_message_object
 from a2a.types import (
     JSONRPCErrorResponse,
@@ -287,6 +288,54 @@ class StrandsResponder:
         return default
 
 
+class AccountAgentDirectHttpDelegate:
+    """Simple HTTP direct call to account agent."""
+
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.last_error = ""
+
+    def mode(self) -> str:
+        return "direct_http"
+
+    def enabled(self) -> bool:
+        return self.settings.get_bool("service.account_agent.direct_http_enabled", False)
+
+    def endpoint(self) -> str:
+        return self.settings.get("service.account_agent.direct_http_url", "http://localhost:8082/assist").strip()
+
+    def invoke(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.enabled():
+            return {"status": "skipped", "delivery_mode": "direct_http_disabled"}
+
+        try:
+            timeout_seconds = self.settings.get_int("http.timeout.seconds", 20)
+            response = requests.post(
+                self.endpoint(),
+                json=payload,
+                headers={"Content-Type": "application/json"},
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            result = response.json()
+            self.last_error = ""
+            return {
+                "status": "ok",
+                "answer": result.get("answer", ""),
+                "delivery_mode": "direct_http",
+                "downstream_response": result,
+            }
+        except Exception as exc:
+            self.last_error = f"Failed to invoke account agent via HTTP: {exc.__class__.__name__}: {exc}"
+            LOGGER.exception(self.last_error)
+            return {
+                "status": "degraded",
+                "delivery_mode": "direct_http_error",
+                "answer": f"Account agent HTTP call failed: {exc}",
+                "http_error": self.last_error,
+            }
+
+
 class AccountAgentRemoteA2ADelegate:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -408,6 +457,7 @@ class OrchestratorService:
         )
         self.agent = StrandsResponder(self.settings, self.system_prompt, "orchestrator-agent")
         self.remote_a2a_delegate = AccountAgentRemoteA2ADelegate(self.settings)
+        self.direct_http_delegate = AccountAgentDirectHttpDelegate(self.settings)
 
     def health(self) -> dict[str, str]:
         return {
@@ -485,15 +535,23 @@ Reply in under 80 words and keep the answer appropriate for a corporate IT suppo
         return self.agent.ask_text(prompt, fallback)
 
     def call_account_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
+        # Try direct HTTP first if enabled
+        if self.direct_http_delegate.enabled():
+            direct_response = self.direct_http_delegate.invoke(payload)
+            if direct_response.get("status") == "ok":
+                return direct_response
+
+        # Fall back to A2A if direct HTTP not enabled or failed
         remote_a2a_response = self.remote_a2a_delegate.invoke(payload)
         if remote_a2a_response.get("status") == "ok":
             return remote_a2a_response
         return {
             "status": "degraded",
-            "delivery_mode": "strands_multiagent_a2a_required",
+            "delivery_mode": "account_agent_unavailable",
             "answer": (
-                "The account-management runtime could not be reached through the configured Strands multi-agent A2A path. "
-                f"Detail: {remote_a2a_response.get('answer', 'No downstream response returned.')}"
+                "The account-management agent could not be reached. "
+                f"Direct HTTP: {self.direct_http_delegate.last_error}. "
+                f"A2A: {remote_a2a_response.get('answer', 'No response.')}"
             ),
         }
 
