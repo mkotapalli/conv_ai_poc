@@ -5,9 +5,8 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
-import boto3
 import requests
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
@@ -36,76 +35,14 @@ class Settings:
     def __init__(self, path: Path):
         self.path = path
         self.properties = load_properties(path)
-        self.secret_overrides = self._load_secret_overrides()
 
     @staticmethod
     def _to_env_key(key: str) -> str:
         return key.upper().replace(".", "_").replace("-", "_")
 
-    def _raw_lookup(self, key: str, default: str = "") -> str:
-        env_key = self._to_env_key(key)
-        return os.getenv(env_key, self.properties.get(key, default))
-
-    def _load_secret_overrides(self) -> dict[str, str]:
-        enabled_value = self._raw_lookup("aws.secretsmanager.enabled", "true").strip().lower()
-        if enabled_value not in {"1", "true", "yes", "y", "on"}:
-            return {}
-
-        secret_name = self._raw_lookup("aws.secretsmanager.secret_name", "").strip()
-        if not secret_name:
-            return {}
-
-        region = self._raw_lookup(
-            "aws.secretsmanager.region",
-            self._raw_lookup("aws.region", os.getenv("AWS_REGION", "us-east-1")),
-        ).strip() or "us-east-1"
-
-        try:
-            client = boto3.session.Session(region_name=region).client("secretsmanager", region_name=region)
-            response = client.get_secret_value(SecretId=secret_name)
-            secret_payload = json.loads(response.get("SecretString", "{}"))
-            if not isinstance(secret_payload, dict):
-                return {}
-            LOGGER.info(
-                "Loaded secrets from AWS Secrets Manager '%s' with keys: %s",
-                secret_name,
-                sorted(secret_payload.keys()),
-            )
-        except Exception as exc:  # pragma: no cover - depends on AWS env
-            LOGGER.warning("Failed to load AWS Secrets Manager overrides: %s", exc)
-            return {}
-
-        normalized = {str(key): "" if value is None else str(value) for key, value in secret_payload.items()}
-        aliases = {
-            "AWS_ACCESS_KEY_ID": ("AWS_ACCESS_KEY_ID", "aws_access_key_id", "accessKeyId", "access_key_id"),
-            "AWS_SECRET_ACCESS_KEY": (
-                "AWS_SECRET_ACCESS_KEY",
-                "aws_secret_access_key",
-                "secretAccessKey",
-                "secret_access_key",
-            ),
-            "AWS_SESSION_TOKEN": ("AWS_SESSION_TOKEN", "aws_session_token", "sessionToken", "session_token"),
-            "AWS_REGION": ("AWS_REGION", "aws_region", "region"),
-            "AWS_DEFAULT_REGION": ("AWS_DEFAULT_REGION", "aws_default_region"),
-        }
-        for env_name, candidates in aliases.items():
-            value = next((normalized.get(candidate) for candidate in candidates if normalized.get(candidate)), "")
-            if value and not os.getenv(env_name):
-                os.environ[env_name] = value
-        return normalized
-
     def get(self, key: str, default: str = "") -> str:
         env_key = self._to_env_key(key)
-        if env_key in os.environ:
-            return os.environ[env_key]
-        if env_key in self.secret_overrides:
-            return self.secret_overrides[env_key]
-        if key in self.secret_overrides:
-            return self.secret_overrides[key]
-        lowered_env_key = env_key.lower()
-        if lowered_env_key in self.secret_overrides:
-            return self.secret_overrides[lowered_env_key]
-        return self.properties.get(key, default)
+        return os.getenv(env_key, self.properties.get(key, default))
 
     def get_int(self, key: str, default: int) -> int:
         try:
@@ -123,13 +60,19 @@ class OrchestratorBridge:
         return {
             "status": "ok",
             "service": self.settings.get("app.name", "acct-mgnt-mcp"),
-            "mcp_path": self.settings.get("service.agentcore.runtime.mcp_path", "/mcp"),
-            "health_path": self.settings.get("service.agentcore.runtime.health_path", "/health"),
+            "mcp_path": "/mcp",
+            "health_path": "/health",
             "orchestrator_url": self.orchestrator_url,
             "runtime_protocol": self.settings.get("service.agentcore.runtime.protocol", "MCP"),
         }
 
-    def invoke(self, *, message: str, conversation_id: str | None, user_context: dict[str, Any] | None) -> dict[str, Any]:
+    def invoke(
+        self,
+        *,
+        message: str,
+        conversation_id: str | None,
+        user_context: dict[str, Any] | None,
+    ) -> dict[str, Any]:
         if not self.orchestrator_url:
             raise RuntimeError("Orchestrator URL is missing from configuration.")
 
@@ -142,13 +85,12 @@ class OrchestratorBridge:
             "message": normalized_message,
             "user_context": user_context or {},
         }
-        payload_text = json.dumps(payload)
         headers = {"content-type": "application/json"}
         timeout_seconds = self.settings.get_int("http.timeout.seconds", 30)
 
         response = requests.post(
             self.orchestrator_url,
-            data=payload_text,
+            data=json.dumps(payload),
             headers=headers,
             timeout=timeout_seconds,
         )
@@ -161,19 +103,25 @@ class OrchestratorBridge:
 
 SETTINGS = Settings(CONFIG_PATH)
 BRIDGE = OrchestratorBridge(SETTINGS)
+
+# AgentCore Runtime requires:
+#   - host 0.0.0.0, port 8000  (hard-coded by the platform)
+#   - streamable_http_path /mcp (platform default)
+#   - stateless_http=True       (recommended and required for horizontal scaling)
 MCP_SERVER = FastMCP(
     name=SETTINGS.get("app.name", "acct-mgnt-mcp"),
     instructions=(
         "Expose account-management MCP tools for AgentCore Gateway. Use the orchestrator_invoke tool "
         "to route password-reset, unlock, and general account access requests to orchestrator-agent."
     ),
-    host=SETTINGS.get("server.host", "0.0.0.0"),
-    port=SETTINGS.get_int("server.port", 8080),
-    streamable_http_path=SETTINGS.get("service.agentcore.runtime.mcp_path", "/mcp"),
+    host="0.0.0.0",
+    port=8000,
     stateless_http=True,
-    log_level="INFO",
 )
 
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+# Resources return str — MCP protocol requires text content, not raw dicts.
 
 @MCP_SERVER.resource(
     "account://password-reset",
@@ -181,13 +129,13 @@ MCP_SERVER = FastMCP(
     description="Guidance for password reset requests that should be routed through the orchestrator-agent.",
     mime_type="application/json",
 )
-def password_reset_resource() -> dict[str, Any]:
-    return {
+def password_reset_resource() -> str:
+    return json.dumps({
         "action": "password_reset",
         "description": "Handles user password reset requests through the orchestrator-agent.",
         "target": "orchestrator-agent",
         "tool": "orchestrator_invoke",
-    }
+    })
 
 
 @MCP_SERVER.resource(
@@ -196,13 +144,13 @@ def password_reset_resource() -> dict[str, Any]:
     description="Guidance for account unlock requests that should be routed through the orchestrator-agent.",
     mime_type="application/json",
 )
-def account_unlock_resource() -> dict[str, Any]:
-    return {
+def account_unlock_resource() -> str:
+    return json.dumps({
         "action": "account_unlock",
         "description": "Handles account unlock requests through the orchestrator-agent.",
         "target": "orchestrator-agent",
         "tool": "orchestrator_invoke",
-    }
+    })
 
 
 @MCP_SERVER.resource(
@@ -211,57 +159,72 @@ def account_unlock_resource() -> dict[str, Any]:
     description="Runtime metadata used when registering this MCP service in AgentCore Runtime and Gateway.",
     mime_type="application/json",
 )
-def runtime_registration_resource() -> dict[str, Any]:
-    return {
+def runtime_registration_resource() -> str:
+    return json.dumps({
         "server_protocol": SETTINGS.get("service.agentcore.runtime.protocol", "MCP"),
-        "mcp_path": SETTINGS.get("service.agentcore.runtime.mcp_path", "/mcp"),
-        "health_path": SETTINGS.get("service.agentcore.runtime.health_path", "/health"),
-        "container_port": SETTINGS.get_int("server.port", 8080),
-    }
+        "mcp_path": "/mcp",
+        "health_path": "/health",
+        "container_port": 8000,
+    })
 
+
+# ── Tool ──────────────────────────────────────────────────────────────────────
+# IMPORTANT: AgentCore Gateway rejects tool schemas containing JSON Schema
+# keywords like $ref or $defs. Using dict[str, Any] or nested Pydantic models
+# in the tool signature causes FastMCP to emit these keywords, which makes
+# AgentCore silently drop the tool from tools/list entirely.
+#
+# Fix: flatten all parameters to simple scalar/Optional[str] types only.
+# user_context is decomposed into discrete fields (user_id, memory_id).
+# Return type is str (JSON) instead of dict for the same reason.
 
 @MCP_SERVER.tool(
     name="orchestrator_invoke",
-    title="Invoke Orchestrator Agent",
-    description="Forward a user message from AgentCore Gateway to orchestrator-agent and return the orchestration result.",
+    description=(
+        "Forward a user message from AgentCore Gateway to orchestrator-agent "
+        "and return the orchestration result. "
+        "Use this tool for password reset, account unlock, and general account access requests."
+    ),
 )
 def orchestrator_invoke(
     message: str,
-    conversation_id: str | None = None,
-    user_context: dict[str, Any] | None = None,
-    user_query: str | None = None,
-    user_id: str | None = None,
-) -> dict[str, Any]:
+    conversation_id: Optional[str] = None,
+    user_query: Optional[str] = None,
+    user_id: Optional[str] = None,
+    memory_id: Optional[str] = None,
+) -> str:
     normalized_message = (message or user_query or "").strip()
-    normalized_user_context = dict(user_context or {})
-    memory_id = SETTINGS.get("memory.agentcore.memory_id", "").strip()
-    if memory_id and "memory_id" not in normalized_user_context:
-        normalized_user_context["memory_id"] = memory_id
-    if user_id and "user_id" not in normalized_user_context:
-        normalized_user_context["user_id"] = user_id
+
+    user_context: dict[str, Any] = {}
+    resolved_memory_id = memory_id or SETTINGS.get("memory.agentcore.memory_id", "").strip()
+    if resolved_memory_id:
+        user_context["memory_id"] = resolved_memory_id
+    if user_id:
+        user_context["user_id"] = user_id
 
     result = BRIDGE.invoke(
         message=normalized_message,
         conversation_id=conversation_id,
-        user_context=normalized_user_context,
+        user_context=user_context,
     )
-    return {
+
+    return json.dumps({
         "status": result.get("status", "ok") if isinstance(result, dict) else "ok",
         "conversation_id": (result.get("conversation_id") if isinstance(result, dict) else None)
         or conversation_id,
         "delivery_mode": result.get("delivery_mode", "orchestrator") if isinstance(result, dict) else "orchestrator",
         "orchestrator_response": result,
-    }
+    })
 
+
+# ── Auxiliary HTTP routes ──────────────────────────────────────────────────────
 
 @MCP_SERVER.custom_route("/", methods=["GET"], include_in_schema=False)
 async def root(_: Request) -> JSONResponse:
-    return JSONResponse(
-        {
-            "service": SETTINGS.get("app.name", "acct-mgnt-mcp"),
-            "message": "Use POST /mcp for the MCP transport and GET /health for service health.",
-        }
-    )
+    return JSONResponse({
+        "service": SETTINGS.get("app.name", "acct-mgnt-mcp"),
+        "message": "Use POST /mcp for the MCP transport and GET /health for service health.",
+    })
 
 
 @MCP_SERVER.custom_route("/health", methods=["GET"], include_in_schema=False)
@@ -269,10 +232,13 @@ async def health(_: Request) -> JSONResponse:
     return JSONResponse(BRIDGE.health())
 
 
+# streamable_http_app() handles the full MCP lifecycle:
+# initialize → notifications/initialized → tools/list → tools/call
 app = MCP_SERVER.streamable_http_app()
+
 
 if __name__ == "__main__":
     import uvicorn
 
-    port = int(os.getenv("PORT", os.getenv("SERVER_PORT", "8080")))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = int(os.getenv("PORT", os.getenv("SERVER_PORT", "8000")))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
