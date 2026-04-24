@@ -2,6 +2,7 @@
   "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
   "python.analysis.extraPaths": [
     "./src/orchestrator-agent",
-    "./src/acct-mgmt-agent"
+    "./src/acct-mgmt-agent",
+    "./src/acct-mgnt-mcp/deployment"
   ]
 }
