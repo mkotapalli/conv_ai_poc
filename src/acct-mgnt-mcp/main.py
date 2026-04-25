@@ -69,20 +69,24 @@ class OrchestratorBridge:
     def invoke(
         self,
         *,
-        message: str,
+        intent: str,
+        request_context: str,
         conversation_id: str | None,
+        member_context: dict[str, Any] | None,
         user_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         if not self.orchestrator_url:
             raise RuntimeError("Orchestrator URL is missing from configuration.")
 
-        normalized_message = message.strip()
-        if not normalized_message:
-            raise ValueError("A non-empty message is required.")
+        normalized_request_context = request_context.strip()
+        if not normalized_request_context:
+            raise ValueError("A non-empty request_context is required.")
 
         payload = {
+            "intent": intent,
             "conversation_id": conversation_id or str(uuid.uuid4()),
-            "message": normalized_message,
+            "member_context": member_context or {},
+            "request_context": normalized_request_context,
             "user_context": user_context or {},
         }
         headers = {"content-type": "application/json"}
@@ -187,34 +191,45 @@ def runtime_registration_resource() -> str:
     ),
 )
 def orchestrator_invoke(
-    message: str,
+    intent: Optional[str] = None,
+    request_context: Optional[str] = None,
     conversation_id: Optional[str] = None,
-    user_query: Optional[str] = None,
-    user_id: Optional[str] = None,
-    memory_id: Optional[str] = None,
+    member_contract_number: Optional[str] = None,
+    member_birth_date: Optional[str] = None,
+    member_zip: Optional[str] = None,
+    member_eid: Optional[str] = None,
+    member_group_number: Optional[str] = None,
+    member_group_suffix: Optional[str] = None,
 ) -> str:
-    normalized_message = (message or user_query or "").strip()
+    normalized_request_context = (request_context or "").strip()
 
     user_context: dict[str, Any] = {}
-    resolved_memory_id = memory_id or SETTINGS.get("memory.agentcore.memory_id", "").strip()
-    if resolved_memory_id:
-        user_context["memory_id"] = resolved_memory_id
-    if user_id:
-        user_context["user_id"] = user_id
+
+    member_context: dict[str, Any] = {}
+    if member_contract_number:
+        member_context["contractNumber"] = member_contract_number
+    if member_birth_date:
+        member_context["birthDate"] = member_birth_date
+    if member_zip:
+        member_context["zip"] = member_zip
+    if member_eid:
+        member_context["eid"] = member_eid
+    if member_group_number:
+        member_context["groupNumber"] = member_group_number
+    if member_group_suffix:
+        member_context["groupSuffix"] = member_group_suffix
 
     result = BRIDGE.invoke(
-        message=normalized_message,
+        intent=(intent or "").strip(),
+        request_context=normalized_request_context,
         conversation_id=conversation_id,
+        member_context=member_context,
         user_context=user_context,
     )
 
-    return json.dumps({
-        "status": result.get("status", "ok") if isinstance(result, dict) else "ok",
-        "conversation_id": (result.get("conversation_id") if isinstance(result, dict) else None)
-        or conversation_id,
-        "delivery_mode": result.get("delivery_mode", "orchestrator") if isinstance(result, dict) else "orchestrator",
-        "orchestrator_response": result,
-    })
+    if isinstance(result, dict):
+        return json.dumps(result)
+    return json.dumps({"request_context": str(result)})
 
 
 # ── Auxiliary HTTP routes ──────────────────────────────────────────────────────

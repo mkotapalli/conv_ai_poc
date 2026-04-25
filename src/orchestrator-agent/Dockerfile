@@ -12,6 +12,6 @@ COPY . .
 
 ENV CONFIG_FILE=/app/config/application.properties
 
-EXPOSE 8081
+EXPOSE 8080
 
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8081"]
+CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8080"]

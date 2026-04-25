@@ -11,8 +11,10 @@ SERVICE = OrchestratorService()
 app = FastAPI(title="Orchestrator Agent", version="0.1.0")
 
 class RequestEnvelope(BaseModel):
+    intent: str | None = None
     conversation_id: str | None = None
-    message: str = Field(min_length=1)
+    member_context: dict[str, str] = Field(default_factory=dict)
+    request_context: str = Field(min_length=1)
     user_context: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -274,50 +274,161 @@ class AccountManagementService:
         }
 
     @staticmethod
-    def _fallback_answer(intent: str) -> str:
-        if intent == "password_reset":
-            return (
-                "POC response: I can help with a password reset. In the company environment, "
-                "this step would verify the user in Okta and trigger the reset workflow."
-            )
-        if intent == "password_unlock":
-            return (
-                "POC response: I can help unlock the account. In the company environment, "
-                "this would call the unlock flow after identity verification."
-            )
-        return "I can assist with password reset or password unlock requests."
+    def _normalize_intent(raw_intent: str) -> str:
+        normalized = raw_intent.strip().lower().replace(" ", "_")
+        if normalized in {"account_pw_reset", "password_reset", "reset_password"}:
+            return "Account_PW_Reset"
+        if normalized in {"account_unlock", "password_unlock", "unlock_account"}:
+            return "Account_Unlock"
+        return "General"
+
+    @staticmethod
+    def _member_context_complete(member_context: dict[str, Any]) -> bool:
+        required_keys = [
+            "contractNumber",
+            "birthDate",
+            "zip",
+            "eid",
+            "groupNumber",
+            "groupSuffix",
+        ]
+        return all(str(member_context.get(key, "")).strip() for key in required_keys)
+
+    @staticmethod
+    def _build_unlock_response(
+        *,
+        intent: str,
+        conversation_id: str,
+        request_context: str,
+        has_required_member_context: bool,
+    ) -> dict[str, Any]:
+        if has_required_member_context:
+            return {
+                "intent": intent,
+                "conversation_id": conversation_id,
+                "account_found": "yes",
+                "account_locked_at_start": "yes",
+                "account_locked_at_end": "no",
+                "password_reset": "no",
+                "action_detail": [
+                    {
+                        "action": "unlock_account",
+                        "status": "success",
+                        "failure_reason": "",
+                    }
+                ],
+                "request_context": request_context,
+            }
+
+        return {
+            "intent": intent,
+            "conversation_id": conversation_id,
+            "account_found": "yes",
+            "account_locked_at_start": "yes",
+            "account_locked_at_end": "yes",
+            "password_reset": "no",
+            "action_detail": [
+                {
+                    "action": "unlock_account",
+                    "status": "failure",
+                    "failure_reason": "missing information",
+                }
+            ],
+            "request_context": request_context,
+        }
+
+    @staticmethod
+    def _build_reset_response(
+        *,
+        intent: str,
+        conversation_id: str,
+        request_context: str,
+        has_required_member_context: bool,
+    ) -> dict[str, Any]:
+        if has_required_member_context:
+            return {
+                "intent": intent,
+                "conversation_id": conversation_id,
+                "account_found": "yes",
+                "account_locked_at_start": "no",
+                "account_locked_at_end": "no",
+                "password_reset": "yes",
+                "action_detail": [
+                    {
+                        "action": "unlock_account",
+                        "status": "failure",
+                        "failure_reason": "account was not locked",
+                    },
+                    {
+                        "action": "reset_password",
+                        "status": "success",
+                        "failure_reason": "",
+                    },
+                ],
+                "request_context": request_context,
+            }
+
+        return {
+            "intent": intent,
+            "conversation_id": conversation_id,
+            "account_found": "yes",
+            "account_locked_at_start": "yes",
+            "account_locked_at_end": "yes",
+            "password_reset": "no",
+            "action_detail": [
+                {
+                    "action": "unlock_account",
+                    "status": "failure",
+                    "failure_reason": "missing information",
+                }
+            ],
+            "request_context": request_context,
+        }
 
     def handle_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         conversation_id = payload.get("conversation_id") or "default-conversation"
-        intent = str(payload.get("intent", "general")).strip().lower()
-        message = str(payload.get("message", "")).strip()
+        intent = self._normalize_intent(str(payload.get("intent", "General")))
+        request_context = str(payload.get("request_context") or payload.get("message", "")).strip()
+        member_context = dict(payload.get("member_context") or {})
         user_context = dict(payload.get("user_context") or {})
         memory_id = self.settings.get("memory.agentcore.memory_id", "").strip()
         if memory_id and "memory_id" not in user_context:
             user_context["memory_id"] = memory_id
 
-        self.memory.append(conversation_id, "user", message)
-        fallback = self._fallback_answer(intent)
-        prompt = f"""
-{self.system_prompt}
+        self.memory.append(conversation_id, "user", request_context)
+        has_required_member_context = self._member_context_complete(member_context)
 
-Conversation history:
-{self.memory.render_history(conversation_id)}
+        if intent == "Account_Unlock":
+            response = self._build_unlock_response(
+                intent=intent,
+                conversation_id=conversation_id,
+                request_context=request_context,
+                has_required_member_context=has_required_member_context,
+            )
+        elif intent == "Account_PW_Reset":
+            response = self._build_reset_response(
+                intent=intent,
+                conversation_id=conversation_id,
+                request_context=request_context,
+                has_required_member_context=has_required_member_context,
+            )
+        else:
+            response = {
+                "intent": "General",
+                "conversation_id": conversation_id,
+                "account_found": "no",
+                "account_locked_at_start": "no",
+                "account_locked_at_end": "no",
+                "password_reset": "no",
+                "action_detail": [
+                    {
+                        "action": "route_request",
+                        "status": "failure",
+                        "failure_reason": "unsupported intent for account action flow",
+                    }
+                ],
+                "request_context": request_context,
+            }
 
-User intent: {intent}
-User message: {message}
-
-Reply as a corporate IT account-management assistant in under 100 words.
-""".strip()
-        answer = self.agent.ask_text(prompt, fallback)
-        self.memory.append(conversation_id, "assistant", answer)
-
-        return {
-            "status": "ok",
-            "intent": intent,
-            "answer": answer,
-            "memory_provider": self.memory.provider,
-            "memory_id": user_context.get("memory_id", ""),
-            "agent_last_error": self.agent.last_error,
-            "guardrails_enabled": self.agent.guardrails_enabled(),
-        }
+        self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
+        return response

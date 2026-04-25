@@ -21,7 +21,7 @@ def build_app() -> FastAPI:
         if a2a_agent is not None:
             public_url = SERVICE.settings.get("service.a2a.public_url", "").strip()
             host = SERVICE.settings.get("server.host", "0.0.0.0")
-            port = int(SERVICE.settings.get("server.port", "8082"))
+            port = int(SERVICE.settings.get("server.port", "8080"))
             skills = [
                 AgentSkill(
                     id="password_reset_unlock",
@@ -51,9 +51,10 @@ app = build_app()
 
 
 class AgentRequest(BaseModel):
+    intent: str = Field(default="General")
     conversation_id: str | None = None
-    message: str = Field(min_length=1)
-    intent: str = Field(default="general")
+    member_context: dict[str, str] = Field(default_factory=dict)
+    request_context: str = Field(min_length=1)
     user_context: dict[str, Any] = Field(default_factory=dict)
 
 

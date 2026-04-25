@@ -299,7 +299,7 @@ class AccountAgentRemoteA2ADelegate:
         return self.mode() in {"a2a", "strands_multiagent_a2a"}
 
     def endpoint(self) -> str:
-        return self.settings.get("service.account_agent.a2a_url", "http://localhost:8082/a2a").strip().rstrip("/")
+        return self.settings.get("service.account_agent.a2a_url", "http://localhost:8080/a2a").strip().rstrip("/")
 
     @staticmethod
     def _extract_text_from_parts(parts: list[Any] | None) -> str:
@@ -435,29 +435,33 @@ class OrchestratorService:
     @staticmethod
     def _normalize_intent(raw_value: Any) -> str:
         text = str(raw_value).strip().lower().replace(" ", "_")
+        if text in {"account_pw_reset", "account_password_reset", "password_reset", "reset_password"}:
+            return "Account_PW_Reset"
+        if text in {"account_unlock", "password_unlock", "unlock_account", "unlock"}:
+            return "Account_Unlock"
         if "unlock" in text:
-            return "password_unlock"
+            return "Account_Unlock"
         if "reset" in text or "forgot" in text:
-            return "password_reset"
-        return "general"
+            return "Account_PW_Reset"
+        return "General"
 
-    def identify_intent(self, message: str, conversation_id: str) -> dict[str, Any]:
-        fallback_intent = self._fallback_intent(message)
+    def identify_intent(self, request_context: str, conversation_id: str) -> dict[str, Any]:
+        fallback_intent = self._normalize_intent(self._fallback_intent(request_context))
         prompt = f"""
 {self.system_prompt}
 
 Conversation history:
 {self.memory.render_history(conversation_id)}
 
-User message: {message}
+User message: {request_context}
 
 Classify the intent into one of these values only:
-- password_reset
-- password_unlock
-- general
+- Account_PW_Reset
+- Account_Unlock
+- General
 
 Return strict JSON only, for example:
-{{"intent": "password_reset", "confidence": 0.93}}
+{{"intent": "Account_PW_Reset", "confidence": 0.93}}
 """.strip()
 
         result = self.agent.ask_json(prompt, {"intent": fallback_intent, "confidence": 0.75})
@@ -466,7 +470,7 @@ Return strict JSON only, for example:
             "confidence": result.get("confidence", 0.75),
         }
 
-    def general_response(self, message: str, conversation_id: str) -> str:
+    def general_response(self, request_context: str, conversation_id: str) -> str:
         history = self.memory.render_history(conversation_id)
         fallback = (
             "I can help route password reset and password unlock requests. "
@@ -478,71 +482,112 @@ Return strict JSON only, for example:
 Conversation history:
 {history}
 
-User message: {message}
+User message: {request_context}
 
 Reply in under 80 words and keep the answer appropriate for a corporate IT support assistant.
 """.strip()
         return self.agent.ask_text(prompt, fallback)
 
+    def _account_agent_assist_url(self) -> str:
+        explicit = self.settings.get("service.account_agent.assist_url", "").strip()
+        if explicit:
+            return explicit
+        a2a_url = self.settings.get("service.account_agent.a2a_url", "http://localhost:8080/a2a").strip().rstrip("/")
+        if a2a_url.endswith("/a2a"):
+            return f"{a2a_url[:-4]}/assist"
+        return f"{a2a_url}/assist"
+
     def call_account_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
-        remote_a2a_response = self.remote_a2a_delegate.invoke(payload)
-        if remote_a2a_response.get("status") == "ok":
-            return remote_a2a_response
-        return {
-            "status": "degraded",
-            "delivery_mode": "strands_multiagent_a2a_required",
-            "answer": (
-                "The account-management runtime could not be reached through the configured Strands multi-agent A2A path. "
-                f"Detail: {remote_a2a_response.get('answer', 'No downstream response returned.')}"
-            ),
-        }
+        timeout_seconds = self.settings.get_int("http.timeout.seconds", 20)
+        assist_url = self._account_agent_assist_url()
+        try:
+            with httpx.Client(timeout=timeout_seconds) as client:
+                response = client.post(assist_url, json=payload)
+                response.raise_for_status()
+                result = response.json()
+            if isinstance(result, dict):
+                return result
+            raise RuntimeError("Account agent returned a non-object response")
+        except Exception as exc:
+            LOGGER.exception("Failed to invoke account agent /assist endpoint")
+            return {
+                "intent": str(payload.get("intent", "General")),
+                "conversation_id": str(payload.get("conversation_id", "")),
+                "account_found": "no",
+                "account_locked_at_start": "unknown",
+                "account_locked_at_end": "unknown",
+                "password_reset": "no",
+                "action_detail": [
+                    {
+                        "action": "invoke_account_agent",
+                        "status": "failure",
+                        "failure_reason": f"downstream error: {exc}",
+                    }
+                ],
+                "request_context": str(payload.get("request_context", "")),
+            }
 
     def route_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         conversation_id = payload.get("conversation_id") or str(uuid.uuid4())
-        message = str(payload.get("message", "")).strip()
+        request_context = str(payload.get("request_context") or payload.get("message", "")).strip()
+        member_context = dict(payload.get("member_context") or {})
         user_context = dict(payload.get("user_context") or {})
         memory_id = self.settings.get("memory.agentcore.memory_id", "").strip()
         if memory_id and "memory_id" not in user_context:
             user_context["memory_id"] = memory_id
 
-        self.memory.append(conversation_id, "user", message, metadata={"user": user_context})
-        intent_info = self.identify_intent(message, conversation_id)
-        intent = intent_info["intent"]
+        self.memory.append(conversation_id, "user", request_context, metadata={"user": user_context})
 
-        delivery_mode = "direct"
-        if intent in {"password_reset", "password_unlock"}:
-            downstream_response = self.call_account_agent(
+        provided_intent = str(payload.get("intent", "")).strip()
+        if provided_intent:
+            intent = self._normalize_intent(provided_intent)
+            intent_info = {"intent": intent, "confidence": 1.0}
+        else:
+            intent_info = self.identify_intent(request_context, conversation_id)
+            intent = intent_info["intent"]
+
+        if intent in {"Account_PW_Reset", "Account_Unlock"}:
+            response_payload = self.call_account_agent(
                 {
-                    "conversation_id": conversation_id,
-                    "message": message,
                     "intent": intent,
+                    "conversation_id": conversation_id,
+                    "member_context": member_context,
+                    "request_context": request_context,
                     "user_context": user_context,
                 }
             )
-            answer = downstream_response.get("answer", "The account-management agent returned no response.")
-            routed_to = "acct-mgmt-agent"
-            delivery_mode = downstream_response.get("delivery_mode", self.remote_a2a_delegate.mode())
+            response_payload.setdefault("intent", intent)
+            response_payload.setdefault("conversation_id", conversation_id)
+            response_payload.setdefault("request_context", request_context)
+            self.memory.append(
+                conversation_id,
+                "assistant",
+                json.dumps(response_payload, default=str),
+                metadata={"intent": intent, "routed_to": "acct-mgmt-agent", "delivery_mode": "assist_http"},
+            )
+            return response_payload
         else:
-            answer = self.general_response(message, conversation_id)
-            routed_to = "orchestrator-agent"
-
-        self.memory.append(
-            conversation_id,
-            "assistant",
-            answer,
-            metadata={"intent": intent, "routed_to": routed_to, "delivery_mode": delivery_mode},
-        )
-
-        return {
-            "status": "ok",
-            "conversation_id": conversation_id,
-            "intent": intent,
-            "confidence": intent_info.get("confidence", 0.75),
-            "routed_to": routed_to,
-            "delivery_mode": delivery_mode,
-            "answer": answer,
-            "memory_provider": self.memory.provider,
-            "memory_id": user_context.get("memory_id", ""),
-            "guardrails_enabled": self.agent.guardrails_enabled(),
-            "user": user_context.get("sub", "anonymous"),
-        }
+            answer = self.general_response(request_context, conversation_id)
+            response_payload = {
+                "intent": "General",
+                "conversation_id": conversation_id,
+                "account_found": "no",
+                "account_locked_at_start": "no",
+                "account_locked_at_end": "no",
+                "password_reset": "no",
+                "action_detail": [
+                    {
+                        "action": "route_request",
+                        "status": "failure",
+                        "failure_reason": "unsupported intent for account actions",
+                    }
+                ],
+                "request_context": answer,
+            }
+            self.memory.append(
+                conversation_id,
+                "assistant",
+                answer,
+                metadata={"intent": "General", "routed_to": "orchestrator-agent", "delivery_mode": "direct"},
+            )
+            return response_payload

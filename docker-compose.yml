@@ -4,7 +4,7 @@ services:
       context: ./src/orchestrator-agent
     container_name: orchestrator-agent
     ports:
-      - "8081:8081"
+      - "8081:8080"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
@@ -19,7 +19,7 @@ services:
       context: ./src/acct-mgmt-agent
     container_name: acct-mgmt-agent
     ports:
-      - "8082:8082"
+      - "8082:8080"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
@@ -37,7 +37,7 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
       AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
-      SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8081/orchestrate
+      SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8080/orchestrate
     volumes:
       - ${USERPROFILE}/.aws:/root/.aws:ro
     depends_on:
