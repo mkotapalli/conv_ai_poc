@@ -1,18 +1,37 @@
-# AgentCore Deployment (Separate Runtimes + Strands Multi-Agent A2A)
-
-This setup uses separate runtime images and explicit Strands A2A server/client with agent card.
-
-This is the only supported orchestrator-to-account-agent path in the current codebase. HTTP fallback and in-process tool-handoff fallback have been removed.
+# AgentCore Deployment
 
 ## Architecture
 
 ```
-Client
-   -> AgentCore Gateway
-   -> acct-mgnt-mcp Runtime (MCP)
-   -> orchestrator-agent Runtime (Strands A2A client)
-   -> acct-mgmt-agent Runtime (Strands A2A server + agent card)
+Client (LLM / GCP / Portal)
+   │
+   ▼
+AgentCore Gateway (Okta-protected, MCP)
+   │  SigV4
+   ▼
+acct-mgnt-mcp Runtime  (MCP server, port 8000)
+   │  SigV4  SERVICE_ORCHESTRATOR_URL
+   ▼
+orchestrator-agent Runtime  (HTTP /invocations, port 8080)
+   │  SigV4  SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL
+   ▼
+acct-mgmt-agent Runtime  (HTTP /invocations, port 8080)
 ```
+
+Runtime-to-runtime communication uses SigV4-signed HTTPS to the AgentCore
+invocations endpoint. No VPC networking is required.
+
+---
+
+## Current Runtime IDs (bcbs-dev)
+
+| Component | Runtime ID | Role suffix |
+|---|---|---|
+| MCP | `bcbs_dev_convai_mcp-Vt2A72DKeq` | `-zix3c` |
+| Orchestrator | `bcbs_dev_convai_orchestrator-GEkw1YGeCY` | `-kugos` |
+| Acct-mgmt | `bcbs_dev_convai_acct_mgnt-8xi3SACIES` | *(separate role)* |
+
+---
 
 ## 1. Build and Push ARM64 Images
 
@@ -20,115 +39,211 @@ Client
 .\build_and_push_to_ecr.ps1 -ImageTag latest
 ```
 
-Linux bastion host:
+Linux / bastion:
 
 ```bash
 chmod +x ./build_and_push_to_ecr.sh
 ./build_and_push_to_ecr.sh --image-tag latest
 ```
 
-Required runtime images:
+ECR images produced:
 
-- `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc:orchestrator-agent-latest`
-- `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc:acct-mgmt-agent-latest`
-- `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc:acct-mgnt-mcp-latest`
+| Tag | Runtime |
+|---|---|
+| `orchestrator-agent-latest` | orchestrator-agent |
+| `acct-mgmt-agent-latest` | acct-mgmt-agent |
+| `acct-mgnt-mcp-latest` | acct-mgnt-mcp |
 
-## 2. Create Runtime in AWS Console: acct-mgmt-agent (A2A Server)
+ECR registry: `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc`
 
-1. AgentCore -> Runtimes -> Create runtime
-2. Name: `acct-mgmt-agent-runtime`
-3. Source: Container image
-4. Image URI: `...:acct-mgmt-agent-latest`
-5. Protocol: `HTTP`
-6. Port: `8082`
-7. Add VPC + IAM runtime role
-8. Add environment variables:
-    - `AWS_REGION=us-east-1`
-    - `AWS_SECRETSMANAGER_ENABLED=true`
-    - `AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets`
-    - `MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d`
-    - `SERVICE_A2A_ENABLED=true`
-    - `SERVICE_A2A_MOUNT_PATH=/a2a`
-    - `SERVICE_A2A_PUBLIC_URL=<ACCT_MGMT_ENDPOINT_URL>/a2a`
-    - `AUTH_A2A_REQUIRED_HEADER=x-agentcore-a2a`
-    - `AUTH_A2A_EXPECTED_VALUE=<YOUR_SHARED_A2A_TOKEN>`
-9. Create endpoint and save as `<ACCT_MGMT_ENDPOINT_URL>`
+---
 
-Notes:
+## 2. Create / Update Runtime: acct-mgmt-agent
 
-- A2A agent card URL will be available at: `<ACCT_MGMT_ENDPOINT_URL>/a2a/.well-known/agent-card.json`
-- A2A JSON-RPC endpoint will be: `<ACCT_MGMT_ENDPOINT_URL>/a2a`
+| Field | Value |
+|---|---|
+| Protocol | `HTTP` |
+| Port | `8080` |
+| Image | `...:acct-mgmt-agent-latest` |
 
-## 3. Create Runtime in AWS Console: orchestrator-agent (A2A Client)
+Environment variables:
 
-1. AgentCore -> Runtimes -> Create runtime
-2. Name: `orchestrator-agent-runtime`
-3. Source: Container image
-4. Image URI: `...:orchestrator-agent-latest`
-5. Protocol: `HTTP`
-6. Port: `8080`
-7. Add VPC + IAM runtime role
-8. Add environment variables:
-    - `AWS_REGION=us-east-1`
-    - `AWS_SECRETSMANAGER_ENABLED=true`
-    - `AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets`
-    - `MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d`
-    - `SERVICE_ACCOUNT_AGENT_INVOKE_MODE=a2a`
-    - `SERVICE_ACCOUNT_AGENT_A2A_URL=<ACCT_MGMT_ENDPOINT_URL>/a2a`
-9. Create endpoint and save as `<ORCHESTRATOR_ENDPOINT_URL>`
+```
+AWS_REGION=us-east-1
+AWS_SECRETSMANAGER_ENABLED=true
+AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets
+MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d
+```
 
-## 4. Create Runtime in AWS Console: acct-mgnt-mcp
+- No downstream runtime calls — does not need `InvokeRuntime` permission.
+- Exposes `POST /invocations` and `POST /assist`.
 
-1. AgentCore -> Runtimes -> Create runtime
-2. Name: `acct-mgnt-mcp-runtime`
-3. Source: Container image
-4. Image URI: `...:acct-mgnt-mcp-latest`
-5. Protocol: `MCP`
-6. Port: `8083`
-7. Add VPC + IAM runtime role
-8. Add environment variables:
-    - `AWS_REGION=us-east-1`
-    - `AWS_SECRETSMANAGER_ENABLED=true`
-    - `AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets`
-    - `MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d`
-    - `SERVICE_ORCHESTRATOR_URL=<ORCHESTRATOR_ENDPOINT_URL>/orchestrate`
-9. Create endpoint and save as `<MCP_ENDPOINT_URL>`
+---
 
-## 5. Configure Gateway
+## 3. Create / Update Runtime: orchestrator-agent
 
-1. AgentCore -> Gateways -> Create gateway
-2. Attach memory ID: `bcbs_dev_convai_memory-KBvo716q7d`
-3. Add MCP integration:
-    - Target URL: `<MCP_ENDPOINT_URL>`
-    - Tool: `orchestrator_invoke`
-4. Save `<GATEWAY_INVOKE_URL>`
+| Field | Value |
+|---|---|
+| Protocol | `HTTP` |
+| Port | `8080` |
+| Image | `...:orchestrator-agent-latest` |
 
-## 6. Validation
+Environment variables:
 
-- `GET <ACCT_MGMT_ENDPOINT_URL>/a2a/.well-known/agent-card.json` returns an agent card
-- `GET <ORCHESTRATOR_ENDPOINT_URL>/health` shows:
-   - `account_agent_invoke_mode=a2a`
-   - `account_agent_a2a_url=<ACCT_MGMT_ENDPOINT_URL>/a2a`
-- End-to-end response includes:
-   - `routed_to=acct-mgmt-agent`
-   - `delivery_mode=strands_multiagent_a2a`
+```
+AWS_REGION=us-east-1
+AWS_SECRETSMANAGER_ENABLED=true
+AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets
+MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d
+SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL=https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_acct_mgnt-8xi3SACIES/invocations?qualifier=bcbs_dev_acct_mgmt_endpoint
+```
 
-Local validation before AgentCore deployment:
+- `SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL` must be the fully URL-encoded AgentCore invocations URL for acct-mgmt-agent.
+- Exposes `POST /invocations` and `POST /orchestrate`.
 
-- Start services locally with [start_all.ps1](start_all.ps1)
-- Verify account-agent card locally at `http://localhost:8082/a2a/.well-known/agent-card.json`
-- Verify orchestrator health locally at `http://localhost:8081/health`
-- Run [tests/test_mcp_server.py](tests/test_mcp_server.py) against local MCP on `http://localhost:8083`
+---
 
-## 7. Troubleshooting
+## 4. Create / Update Runtime: acct-mgnt-mcp
 
-- `ModuleNotFoundError: No module named a2a`:
-   - Ensure image was built after adding `a2a-sdk` dependency.
-- A2A card fetch fails:
-   - Verify account-agent runtime endpoint and `/a2a/.well-known/agent-card.json` path.
-- Auth failures calling account-agent:
-   - Verify `AUTH_A2A_REQUIRED_HEADER` and `AUTH_A2A_EXPECTED_VALUE`.
-- Unexpected health output or delivery mode:
-   - Confirm `service.account_agent.invoke_mode=a2a` and `service.account_agent.a2a_url` are the only downstream account-agent settings in [src/orchestrator-agent/config/application.properties](src/orchestrator-agent/config/application.properties).
-- MCP 406:
-   - Send `Accept: application/json, text/event-stream`.
+| Field | Value |
+|---|---|
+| Protocol | `MCP` |
+| Port | `8000` |
+| Image | `...:acct-mgnt-mcp-latest` |
+
+Environment variables:
+
+```
+AWS_REGION=us-east-1
+AWS_SECRETSMANAGER_ENABLED=true
+AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets
+MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d
+SERVICE_ORCHESTRATOR_URL=https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_orchestrator-GEkw1YGeCY/invocations?qualifier=bcbs_dev_orchestrator_endpoint
+```
+
+- `SERVICE_ORCHESTRATOR_URL` must be the fully URL-encoded AgentCore invocations URL for orchestrator-agent.
+- Exposes `/mcp` (MCP streamable HTTP).
+
+---
+
+## 5. IAM Execution Policies
+
+Each runtime role needs cross-runtime `InvokeRuntime` permission on the downstream runtime.
+See [AGENTCORE_EXECUTION_POLICIES.md](AGENTCORE_EXECUTION_POLICIES.md) for full policy documents and CLI commands.
+
+Summary of inline policies to add:
+
+| Role (suffix) | Policy name | Allows |
+|---|---|---|
+| `-zix3c` (MCP) | `AllowInvokeOrchestratorRuntime` | `InvokeRuntime` on orchestrator ARN |
+| `-kugos` (Orchestrator) | `AllowInvokeAcctRuntime` | `InvokeRuntime` on acct-mgmt ARN |
+
+Apply:
+
+```powershell
+# MCP role -> orchestrator
+aws iam put-role-policy `
+  --role-name "AmazonBedrockAgentCoreRuntimeDefaultServiceRole-zix3c" `
+  --policy-name "AllowInvokeOrchestratorRuntime" `
+  --policy-document file://iam/allow-invoke-orchestrator.json
+
+# Orchestrator role -> acct-mgmt
+aws iam put-role-policy `
+  --role-name "AmazonBedrockAgentCoreRuntimeDefaultServiceRole-kugos" `
+  --policy-name "AllowInvokeAcctRuntime" `
+  --policy-document file://iam/allow-invoke-acct.json
+```
+
+> **Cleanup**: Remove any `TempAgentCoreFullAccess` (`bedrock-agentcore:*`) inline policies added during debugging.
+
+---
+
+## 6. Configure Gateway
+
+1. AgentCore → Gateways → open `bcbs-dev-convai-gateway`
+2. MCP target must point at the MCP runtime endpoint.
+3. Gateway URL: `https://bcbs-dev-convai-gateway-e4ing1lwcu.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp`
+
+Okta integration is configured at the gateway layer. Clients must supply a valid Okta bearer token.
+
+---
+
+## 7. Validation
+
+### Per-runtime health
+
+```powershell
+# Direct invocation test (SigV4 signed)
+python tests\test_runtime_invocation.py `
+  --url "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_orchestrator-GEkw1YGeCY/invocations?qualifier=bcbs_dev_orchestrator_endpoint" `
+  --message "I need to reset my password"
+```
+
+### End-to-end through gateway (requires Okta token)
+
+```powershell
+python tests\request_gateway.py --call-sample --sample-intent Account_Unlock
+python tests\request_gateway.py --call-sample --sample-intent Account_PW_Reset
+```
+
+### End-to-end bypassing gateway/Okta (SigV4 direct to MCP runtime)
+
+```powershell
+python tests\request_mcp_direct.py `
+  --url "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/<mcp-runtime-invocations-url>/mcp" `
+  --call-sample --sample-intent Account_Unlock
+```
+
+### Expected response shape
+
+```json
+{
+  "intent": "Account_Unlock",
+  "conversation_id": "...",
+  "account_found": "yes",
+  "account_locked_at_start": "yes",
+  "account_locked_at_end": "no",
+  "password_reset": "no",
+  "action_detail": [{"action": "unlock_account", "status": "success"}],
+  "delivery_mode": "sigv4_invocation"
+}
+```
+
+---
+
+## 8. Local Development
+
+Start all services locally:
+
+```powershell
+.\start_all.ps1
+```
+
+Service ports:
+
+| Service | Port |
+|---|---|
+| acct-mgmt-agent | 8082 |
+| orchestrator-agent | 8081 |
+| acct-mgnt-mcp | 8083 |
+
+Run MCP tests locally:
+
+```powershell
+python tests\test_mcp_server.py
+python tests\request_mcp_direct.py --url http://localhost:8083/mcp --call-sample
+```
+
+---
+
+## 9. Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `403 Forbidden` from AgentCore invocations URL | Missing `InvokeRuntime` IAM permission | Add inline policy per section 5 |
+| `NameResolutionError` on `bedrock-agentcore-runtime.us-east-1.amazonaws.com` | Wrong `SERVICE_ORCHESTRATOR_URL` hostname | Update env var to `bedrock-agentcore.us-east-1.amazonaws.com/runtimes/...` |
+| `424` from AgentCore | Container returned non-2xx (missing `/invocations` route or health probe failure) | Verify `/ping` and `/invocations` routes exist; check container logs |
+| `status: skipped` in orchestrator response | `SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL` env var not set on orchestrator runtime | Set env var in AgentCore console and restart runtime |
+| `status: degraded` in orchestrator response | Acct-mgmt runtime unreachable or returned error | Check acct-mgmt runtime health and IAM permissions |
+| MCP `406 Not Acceptable` | Missing `Accept` header | Send `Accept: application/json, text/event-stream` |
+| Gateway 403 (not IAM) | Missing or invalid Okta token | Use `request_mcp_direct.py` to bypass gateway and test MCP runtime directly |
