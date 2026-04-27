@@ -66,7 +66,7 @@ Notes:
 3. Source: Container image
 4. Image URI: `...:orchestrator-agent-latest`
 5. Protocol: `HTTP`
-6. Port: `8081`
+6. Port: `8080`
 7. Add VPC + IAM runtime role
 8. Add environment variables:
     - `AWS_REGION=us-east-1`

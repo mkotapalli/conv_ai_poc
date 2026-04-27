@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from typing import Any
@@ -16,8 +17,22 @@ except ImportError as exc:  # pragma: no cover
 
 
 DEFAULT_GATEWAY_URL = (
-    "https://bcbs-dev-convai-s3-gateway-1aoc3jnvjw.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
+    "https://bcbs-dev-convai-gateway-e4ing1lwcu.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 )
+
+
+def build_sample_tool_args(intent: str) -> dict[str, str]:
+    return {
+        "intent": intent,
+        "conversation_id": "123",
+        "request_context": "basic LLM message from GCP",
+        "member_contract_number": "918783081",
+        "member_birth_date": "1971-03-11",
+        "member_zip": "49503",
+        "member_eid": "406070601060300",
+        "member_group_number": "00257995",
+        "member_group_suffix": "0004",
+    }
 
 
 def build_headers(token_env: str, api_key_env: str) -> dict[str, str]:
@@ -48,6 +63,8 @@ async def run_test(
     token_env: str,
     api_key_env: str,
     skip_resources: bool,
+    call_sample: bool,
+    sample_intent: str,
 ) -> int:
     headers = build_headers(token_env=token_env, api_key_env=api_key_env)
 
@@ -88,6 +105,23 @@ async def run_test(
                         uri = _safe_get(resource, "uri", "<no-uri>")
                         print(f"    - {uri}")
 
+                if call_sample:
+                    print("\n[4/4] call_tool('bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke') sample request")
+                    tool_args = build_sample_tool_args(sample_intent)
+                    call_result = await session.call_tool("bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke", arguments=tool_args)
+                    content = _safe_get(call_result, "content", [])
+                    print("  Request:")
+                    print(json.dumps(tool_args, indent=2))
+                    print("  Response content:")
+                    if content:
+                        for item in content:
+                            if hasattr(item, "text") and getattr(item, "text"):
+                                print(getattr(item, "text"))
+                            else:
+                                print(item)
+                    else:
+                        print(call_result)
+
         print("\nPASS: Gateway MCP checks completed successfully.")
         return 0
     except Exception as exc:  # pragma: no cover
@@ -115,6 +149,17 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip list_resources() check.",
     )
+    parser.add_argument(
+        "--call-sample",
+        action="store_true",
+        help="Call orchestrator_invoke with a sample payload after checks.",
+    )
+    parser.add_argument(
+        "--sample-intent",
+        default="Account_PW_Reset",
+        choices=["Account_PW_Reset", "Account_Unlock"],
+        help="Intent value used for --call-sample.",
+    )
     return parser.parse_args()
 
 
@@ -127,6 +172,8 @@ def main() -> int:
             token_env=args.token_env,
             api_key_env=args.api_key_env,
             skip_resources=args.skip_resources,
+            call_sample=args.call_sample,
+            sample_intent=args.sample_intent,
         )
     )
 

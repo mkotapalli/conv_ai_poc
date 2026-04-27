@@ -37,6 +37,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host ""
 
+# Authenticate Docker to ECR
+Write-Host "Logging in to ECR registry: $ECRRegistry..." -ForegroundColor Yellow
+aws ecr get-login-password --region $AWSRegion | docker login --username AWS --password-stdin $ECRRegistry
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "ERROR: ECR login failed" -ForegroundColor Red
+    exit 1
+}
+Write-Host "ECR login successful" -ForegroundColor Green
+Write-Host ""
+
 # ARM64-only build requires buildx
 Write-Host "Checking docker buildx availability for ARM64 build..." -ForegroundColor Yellow
 docker buildx ls 1>$null 2>$null

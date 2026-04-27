@@ -7,7 +7,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+import boto3
 import requests
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -91,13 +94,34 @@ class OrchestratorBridge:
         }
         headers = {"content-type": "application/json"}
         timeout_seconds = self.settings.get_int("http.timeout.seconds", 30)
+        body = json.dumps(payload).encode("utf-8")
 
-        response = requests.post(
-            self.orchestrator_url,
-            data=json.dumps(payload),
-            headers=headers,
-            timeout=timeout_seconds,
-        )
+        if "bedrock-agentcore" in self.orchestrator_url:
+            region = self.settings.get("aws.region", os.getenv("AWS_REGION", "us-east-1"))
+            session = boto3.Session(region_name=region)
+            credentials = session.get_credentials().get_frozen_credentials()
+            aws_request = AWSRequest(
+                method="POST",
+                url=self.orchestrator_url,
+                data=body,
+                headers=headers,
+            )
+            SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(aws_request)
+            prepped = requests.Request(
+                method="POST",
+                url=self.orchestrator_url,
+                headers=dict(aws_request.headers),
+                data=body,
+            ).prepare()
+            with requests.Session() as http_session:
+                response = http_session.send(prepped, timeout=timeout_seconds)
+        else:
+            response = requests.post(
+                self.orchestrator_url,
+                data=body,
+                headers=headers,
+                timeout=timeout_seconds,
+            )
         response.raise_for_status()
         result = response.json()
         if isinstance(result, dict):

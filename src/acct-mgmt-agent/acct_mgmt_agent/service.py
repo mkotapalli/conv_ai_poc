@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import boto3
-from strands import Agent
+from strands import Agent, tool
 from strands.models import BedrockModel
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -247,6 +247,37 @@ class StrandsResponder:
             self._record_error(f"Failed to execute prompt with `{self.name}`", exc)
             return fallback
 
+    def ask_with_tools(self, prompt: str, tools: list, fallback: str) -> str:
+        model_id = (
+            self.settings.get("bedrock.inference_profile_id")
+            or self.settings.get("bedrock.model_id", "amazon.nova-2-lite-v1:0")
+        ).strip()
+        region = self.settings.get("aws.region", "us-east-1")
+        try:
+            model = BedrockModel(
+                model_id=model_id,
+                region_name=region,
+                temperature=0.2,
+                max_tokens=self.settings.get_int("bedrock.max_tokens", 1024),
+                **self._guardrail_config(),
+            )
+            agent = Agent(
+                name=self.name,
+                model=model,
+                system_prompt=self.system_prompt,
+                tools=tools,
+            )
+            result = agent(prompt)
+            stop_reason = getattr(result, "stop_reason", "")
+            if stop_reason in {"guardrail_intervened", "content_filtered"}:
+                return self._block_message(fallback)
+            text = self._extract_text(result)
+            self.last_error = ""
+            return text or fallback
+        except Exception as exc:
+            self._record_error(f"Failed to execute prompt with tools in `{self.name}`", exc)
+            return fallback
+
     def get_agent(self) -> Agent | None:
         self._build_agent()
         return self._agent
@@ -294,97 +325,6 @@ class AccountManagementService:
         ]
         return all(str(member_context.get(key, "")).strip() for key in required_keys)
 
-    @staticmethod
-    def _build_unlock_response(
-        *,
-        intent: str,
-        conversation_id: str,
-        request_context: str,
-        has_required_member_context: bool,
-    ) -> dict[str, Any]:
-        if has_required_member_context:
-            return {
-                "intent": intent,
-                "conversation_id": conversation_id,
-                "account_found": "yes",
-                "account_locked_at_start": "yes",
-                "account_locked_at_end": "no",
-                "password_reset": "no",
-                "action_detail": [
-                    {
-                        "action": "unlock_account",
-                        "status": "success",
-                        "failure_reason": "",
-                    }
-                ],
-                "request_context": request_context,
-            }
-
-        return {
-            "intent": intent,
-            "conversation_id": conversation_id,
-            "account_found": "yes",
-            "account_locked_at_start": "yes",
-            "account_locked_at_end": "yes",
-            "password_reset": "no",
-            "action_detail": [
-                {
-                    "action": "unlock_account",
-                    "status": "failure",
-                    "failure_reason": "missing information",
-                }
-            ],
-            "request_context": request_context,
-        }
-
-    @staticmethod
-    def _build_reset_response(
-        *,
-        intent: str,
-        conversation_id: str,
-        request_context: str,
-        has_required_member_context: bool,
-    ) -> dict[str, Any]:
-        if has_required_member_context:
-            return {
-                "intent": intent,
-                "conversation_id": conversation_id,
-                "account_found": "yes",
-                "account_locked_at_start": "no",
-                "account_locked_at_end": "no",
-                "password_reset": "yes",
-                "action_detail": [
-                    {
-                        "action": "unlock_account",
-                        "status": "failure",
-                        "failure_reason": "account was not locked",
-                    },
-                    {
-                        "action": "reset_password",
-                        "status": "success",
-                        "failure_reason": "",
-                    },
-                ],
-                "request_context": request_context,
-            }
-
-        return {
-            "intent": intent,
-            "conversation_id": conversation_id,
-            "account_found": "yes",
-            "account_locked_at_start": "yes",
-            "account_locked_at_end": "yes",
-            "password_reset": "no",
-            "action_detail": [
-                {
-                    "action": "unlock_account",
-                    "status": "failure",
-                    "failure_reason": "missing information",
-                }
-            ],
-            "request_context": request_context,
-        }
-
     def handle_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         conversation_id = payload.get("conversation_id") or "default-conversation"
         intent = self._normalize_intent(str(payload.get("intent", "General")))
@@ -396,23 +336,8 @@ class AccountManagementService:
             user_context["memory_id"] = memory_id
 
         self.memory.append(conversation_id, "user", request_context)
-        has_required_member_context = self._member_context_complete(member_context)
 
-        if intent == "Account_Unlock":
-            response = self._build_unlock_response(
-                intent=intent,
-                conversation_id=conversation_id,
-                request_context=request_context,
-                has_required_member_context=has_required_member_context,
-            )
-        elif intent == "Account_PW_Reset":
-            response = self._build_reset_response(
-                intent=intent,
-                conversation_id=conversation_id,
-                request_context=request_context,
-                has_required_member_context=has_required_member_context,
-            )
-        else:
+        if intent not in {"Account_Unlock", "Account_PW_Reset"}:
             response = {
                 "intent": "General",
                 "conversation_id": conversation_id,
@@ -429,6 +354,93 @@ class AccountManagementService:
                 ],
                 "request_context": request_context,
             }
+            self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
+            return response
 
+        # ── Strands tool state tracker (per-request closure) ──────────────────
+        tool_state: dict[str, Any] = {
+            "account_found": "no",
+            "locked_at_start": False,
+            "locked_at_end": True,
+            "password_reset": False,
+            "actions": [],
+        }
+
+        @tool
+        def lookup_account(
+            member_eid: str,
+            member_contract_number: str = "",
+            member_birth_date: str = "",
+            member_zip: str = "",
+            member_group_number: str = "",
+            member_group_suffix: str = "",
+        ) -> str:
+            """Look up a member account to verify identity and check lock status."""
+            has_all = all(
+                f.strip()
+                for f in [member_eid, member_contract_number, member_birth_date,
+                           member_zip, member_group_number, member_group_suffix]
+            )
+            if has_all:
+                tool_state["account_found"] = "yes"
+                tool_state["locked_at_start"] = True
+                return json.dumps({"found": True, "member_eid": member_eid, "locked": True})
+            return json.dumps({"found": False, "reason": "incomplete member context — one or more required fields missing"})
+
+        @tool
+        def unlock_account(member_eid: str) -> str:
+            """Unlock a locked member account. Call after lookup_account confirms the account is locked."""
+            if not member_eid.strip():
+                tool_state["actions"].append({"action": "unlock_account", "status": "failure", "failure_reason": "member_eid required"})
+                return json.dumps({"success": False, "reason": "member_eid required"})
+            tool_state["locked_at_end"] = False
+            tool_state["actions"].append({"action": "unlock_account", "status": "success", "failure_reason": ""})
+            return json.dumps({"success": True, "member_eid": member_eid})
+
+        @tool
+        def reset_password(member_eid: str) -> str:
+            """Reset the password for a member account. Call after lookup_account confirms the account exists."""
+            if not member_eid.strip():
+                tool_state["actions"].append({"action": "reset_password", "status": "failure", "failure_reason": "member_eid required"})
+                return json.dumps({"success": False, "reason": "member_eid required"})
+            tool_state["password_reset"] = True
+            tool_state["actions"].append({"action": "reset_password", "status": "success", "failure_reason": ""})
+            return json.dumps({"success": True, "member_eid": member_eid, "temp_password_sent": True})
+
+        action_verb = "unlock_account" if intent == "Account_Unlock" else "reset_password"
+        prompt = (
+            f"Intent: {intent}\n"
+            f"Conversation ID: {conversation_id}\n"
+            f"User request: {request_context}\n\n"
+            f"Member context:\n{json.dumps(member_context, indent=2)}\n\n"
+            f"Steps:\n"
+            f"1. Call lookup_account using all values from the member context above.\n"
+            f"2. If the account is found, call {action_verb} with the member_eid.\n"
+            f"3. Summarise the outcome in one or two sentences."
+        )
+        fallback = f"Unable to complete the {intent} request. Please contact support."
+        response_text = self.agent.ask_with_tools(
+            prompt, tools=[lookup_account, unlock_account, reset_password], fallback=fallback
+        )
+
+        if not tool_state["actions"]:
+            tool_state["actions"] = [
+                {
+                    "action": action_verb,
+                    "status": "failure",
+                    "failure_reason": "agent did not invoke required tools",
+                }
+            ]
+
+        response = {
+            "intent": intent,
+            "conversation_id": conversation_id,
+            "account_found": tool_state["account_found"],
+            "account_locked_at_start": "yes" if tool_state["locked_at_start"] else "no",
+            "account_locked_at_end": "yes" if tool_state["locked_at_end"] else "no",
+            "password_reset": "yes" if tool_state["password_reset"] else "no",
+            "action_detail": tool_state["actions"],
+            "request_context": response_text,
+        }
         self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
         return response

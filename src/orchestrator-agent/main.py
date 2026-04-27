@@ -29,6 +29,11 @@ def root() -> dict[str, str]:
     }
 
 
+@app.get("/ping")
+def ping() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return SERVICE.health()
@@ -36,4 +41,9 @@ def health() -> dict[str, str]:
 
 @app.post("/orchestrate")
 def orchestrate(payload: RequestEnvelope) -> dict:
+    return SERVICE.route_request(payload.model_dump())
+
+
+@app.post("/invocations")
+def invocations(payload: RequestEnvelope) -> dict:
     return SERVICE.route_request(payload.model_dump())
