@@ -91,11 +91,9 @@ curl -X POST http://localhost:8083/mcp \
     "params": {
       "name": "orchestrator_invoke",
       "arguments": {
-        "message": "I forgot my password",
-        "conversation_id": "mcp-test-1",
-        "user_context": {
-          "user_id": "test-user"
-        }
+        "intent": "Account_PW_Reset",
+        "request_context": "I forgot my password",
+        "conversation_id": "mcp-test-1"
       }
     },
     "id": 3

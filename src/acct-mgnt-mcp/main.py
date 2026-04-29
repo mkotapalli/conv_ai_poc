@@ -203,7 +203,7 @@ def runtime_registration_resource() -> str:
 # AgentCore silently drop the tool from tools/list entirely.
 #
 # Fix: flatten all parameters to simple scalar/Optional[str] types only.
-# user_context is decomposed into discrete fields (user_id, memory_id).
+# user_context is kept minimal and derived server-side.
 # Return type is str (JSON) instead of dict for the same reason.
 
 @MCP_SERVER.tool(
@@ -228,6 +228,9 @@ def orchestrator_invoke(
     normalized_request_context = (request_context or "").strip()
 
     user_context: dict[str, Any] = {}
+    resolved_memory_id = SETTINGS.get("memory.agentcore.memory_id", "").strip()
+    if resolved_memory_id:
+        user_context["memory_id"] = resolved_memory_id
 
     member_context: dict[str, Any] = {}
     if member_contract_number:
