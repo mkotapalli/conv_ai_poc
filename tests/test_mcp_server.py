@@ -80,11 +80,9 @@ def test_invoke_orchestrator():
             "params": {
                 "name": "orchestrator_invoke",
                 "arguments": {
-                    "message": "I forgot my password",
-                    "conversation_id": "mcp-test-user-1",
-                    "user_context": {
-                        "user_id": "mcp-test-user"
-                    }
+                    "intent": "Account_PW_Reset",
+                    "request_context": "I forgot my password",
+                    "conversation_id": "mcp-test-user-1"
                 }
             },
             "id": 3

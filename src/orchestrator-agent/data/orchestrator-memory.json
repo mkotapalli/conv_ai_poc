@@ -171,5 +171,67 @@
         "delivery_mode": "strands_a2a"
       }
     }
+  ],
+  "123": [
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test",
+      "metadata": {
+        "user": {}
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"yes\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"yes\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"success\", \"failure_reason\": \"\"}], \"request_context\": \"Reset password completed successfully.\", \"delivery_mode\": \"sigv4_invocation\"}",
+      "metadata": {
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_multiagent"
+      }
+    },
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test",
+      "metadata": {
+        "user": {}
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"no\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"no\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"failure\", \"failure_reason\": \"account not found\"}], \"request_context\": \"Reset password failed: account not found\", \"delivery_mode\": \"sigv4_invocation\"}",
+      "metadata": {
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_multiagent"
+      }
+    },
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test",
+      "metadata": {
+        "user": {}
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"no\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"no\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"failure\", \"failure_reason\": \"account not found\"}], \"request_context\": \"Reset password failed: account not found\", \"delivery_mode\": \"sigv4_invocation\"}",
+      "metadata": {
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_multiagent"
+      }
+    },
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test",
+      "metadata": {
+        "user": {}
+      }
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"yes\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"yes\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"success\", \"failure_reason\": \"\"}], \"request_context\": \"Reset password completed successfully.\", \"delivery_mode\": \"sigv4_invocation\"}",
+      "metadata": {
+        "routed_to": "acct-mgmt-agent",
+        "delivery_mode": "strands_multiagent"
+      }
+    }
   ]
 }

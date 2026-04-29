@@ -102,12 +102,19 @@ def rpc_call(
     return parse_mcp_response(response)
 
 
+SAMPLE_CONTRACT_BY_INTENT: dict[str, str] = {
+    "Account_Unlock": "918783081",
+    "Account_PW_Reset": "3413623345",
+}
+
+
 def build_sample_tool_args(intent: str) -> dict[str, str]:
+    contract = SAMPLE_CONTRACT_BY_INTENT.get(intent, "918783081")
     return {
         "intent": intent,
         "conversation_id": "123",
         "request_context": "basic LLM message from direct MCP test",
-        "member_contract_number": "918783081",
+        "member_contract_number": contract,
         "member_birth_date": "1971-03-11",
         "member_zip": "49503",
         "member_eid": "406070601060300",
@@ -245,5 +252,5 @@ if __name__ == "__main__":
     sys.exit(main())
 
 #python tests\request_mcp_direct.py --url "https://<your-direct-mcp-endpoint>/mcp" --call-sample --sample-intent Account_Unlock
-#python tests\request_mcp_direct.py --url "https://bedrock-agentcore.us-east-1.amazonaws.com/..." --call-sample --sample-intent Account_PW_Reset
+#python tests\request_mcp_direct.py --url "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_mcp-Vt2A72DKeq/invocations" --call-sample --sample-intent Account_PW_Reset
 #python tests\request_mcp_direct.py --url "https://bedrock-agentcore.us-east-1.amazonaws.com/..." --profile <your-profile> --call-sample

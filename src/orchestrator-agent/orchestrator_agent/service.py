@@ -464,7 +464,6 @@ Reply in under 80 words and keep the answer appropriate for a corporate IT suppo
         def account_management(
             intent: str,
             request_context: str,
-            conversation_id: str,
             member_context_json: str = "{}",
         ) -> str:
             """Route account reset/unlock requests to the account-management runtime."""
@@ -498,7 +497,7 @@ Reply in under 80 words and keep the answer appropriate for a corporate IT suppo
             f"User request: {request_context}\n\n"
             f"Member context available:\n{json.dumps(member_context, indent=2)}\n\n"
             "If the intent is Account_Unlock or Account_PW_Reset, call the account_management tool. "
-            "Pass the normalised intent, the user's request_context, the conversation_id, and the "
+            "Pass the normalised intent, the user's request_context, and the "
             "full member context serialised as JSON in the member_context_json parameter.\n"
             "If the intent is General or unclear, respond directly without calling any tool."
         ).strip()

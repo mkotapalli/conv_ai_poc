@@ -89,6 +89,7 @@ SERVICES=(
     "orchestrator-agent:src/orchestrator-agent"
     "acct-mgmt-agent:src/acct-mgmt-agent"
     "acct-mgnt-mcp:src/acct-mgnt-mcp"
+    "account-api-mcp:src/account-api-mcp"
 )
 
 echo "Building and pushing individual images to ECR"

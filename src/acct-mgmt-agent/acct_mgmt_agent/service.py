@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import boto3
-from strands import Agent, tool
+import requests
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from strands import Agent
 from strands.models import BedrockModel
 
 SERVICE_ROOT = Path(__file__).resolve().parents[1]
@@ -283,6 +286,107 @@ class StrandsResponder:
         return self._agent
 
 
+class AccountApiMcpClient:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.last_error = ""
+
+    def endpoint(self) -> str:
+        return self.settings.get("service.account_api_mcp.url", "").strip()
+
+    def enabled(self) -> bool:
+        return bool(self.endpoint())
+
+    def _signed_headers(self, url: str, body: bytes, headers: dict[str, str]) -> dict[str, str]:
+        region = self.settings.get("aws.region", "us-east-1")
+        session = boto3.Session(region_name=region)
+        credentials = session.get_credentials().get_frozen_credentials()
+        if credentials is None:
+            raise RuntimeError("AWS credentials are not available for SigV4 signing")
+        aws_request = AWSRequest(method="POST", url=url, data=body, headers=headers)
+        SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(aws_request)
+        return dict(aws_request.headers)
+
+    @staticmethod
+    def _parse_mcp_result(response: requests.Response) -> dict[str, Any]:
+        content_type = response.headers.get("content-type", "")
+        text = response.text.strip()
+
+        if "text/event-stream" in content_type or text.startswith("event:"):
+            data_line = next((line for line in text.splitlines() if line.startswith("data:")), "")
+            if not data_line:
+                raise ValueError(f"No data line in MCP SSE response: {text}")
+            payload = json.loads(data_line[len("data:"):].strip())
+        else:
+            payload = response.json()
+
+        content_items = payload.get("result", {}).get("content", [])
+        if not content_items:
+            raise ValueError(f"Unexpected MCP tools/call response: {payload}")
+
+        raw_text = str(content_items[0].get("text", "")).strip()
+        if not raw_text:
+            raise ValueError(f"Empty MCP tools/call result content: {payload}")
+
+        result = json.loads(raw_text)
+        if not isinstance(result, dict):
+            raise ValueError(f"MCP tool response must be a JSON object: {result}")
+        return result
+
+    def lookup(self, intent: str, contract_number: str, conversation_id: str) -> dict[str, Any]:
+        url = self.endpoint()
+        if not url:
+            return {
+                "found": False,
+                "intent": intent,
+                "contractNumber": contract_number,
+                "api_response": "account not found",
+                "error": "service.account_api_mcp.url not configured",
+            }
+
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": "account_api_lookup",
+                "arguments": {
+                    "intent": intent,
+                    "contract_number": contract_number,
+                },
+            },
+            "id": conversation_id,
+        }
+        body = json.dumps(payload).encode("utf-8")
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+        }
+
+        try:
+            timeout_seconds = self.settings.get_int("http.timeout.seconds", 20)
+            if "bedrock-agentcore" in url:
+                headers = self._signed_headers(url, body, headers)
+            response = requests.post(url, data=body, headers=headers, timeout=timeout_seconds)
+            response.raise_for_status()
+            result = self._parse_mcp_result(response)
+            result.setdefault("found", False)
+            result.setdefault("intent", intent)
+            result.setdefault("contractNumber", contract_number)
+            result.setdefault("api_response", "account not found")
+            self.last_error = ""
+            return result
+        except Exception as exc:
+            self.last_error = f"Account API MCP call failed: {exc.__class__.__name__}: {exc}"
+            LOGGER.exception(self.last_error)
+            return {
+                "found": False,
+                "intent": intent,
+                "contractNumber": contract_number,
+                "api_response": "account not found",
+                "error": self.last_error,
+            }
+
+
 class AccountManagementService:
     def __init__(self) -> None:
         self.settings = Settings(CONFIG_PATH)
@@ -292,6 +396,7 @@ class AccountManagementService:
             provider=self.settings.get("memory.provider", "local"),
         )
         self.agent = StrandsResponder(self.settings, self.system_prompt, "acct-mgmt-agent")
+        self.account_api = AccountApiMcpClient(self.settings)
 
     def health(self) -> dict[str, str]:
         return {
@@ -299,6 +404,8 @@ class AccountManagementService:
             "service": self.settings.get("app.name", "acct-mgmt-agent"),
             "memory_provider": self.memory.provider,
             "memory_id": self.settings.get("memory.agentcore.memory_id", ""),
+            "account_api_mcp_url": self.account_api.endpoint(),
+            "account_api_mcp_last_error": self.account_api.last_error,
             "agent_last_error": self.agent.last_error,
             "guardrails_enabled": str(self.agent.guardrails_enabled()).lower(),
             "guardrail_id": self.settings.get("bedrock.guardrail_id", ""),
@@ -307,7 +414,7 @@ class AccountManagementService:
     @staticmethod
     def _normalize_intent(raw_intent: str) -> str:
         normalized = raw_intent.strip().lower().replace(" ", "_")
-        if normalized in {"account_pw_reset", "password_reset", "reset_password"}:
+        if normalized in {"account_pw_reset", "account_reset", "password_reset", "reset_password"}:
             return "Account_PW_Reset"
         if normalized in {"account_unlock", "password_unlock", "unlock_account"}:
             return "Account_Unlock"
@@ -324,6 +431,15 @@ class AccountManagementService:
             "groupSuffix",
         ]
         return all(str(member_context.get(key, "")).strip() for key in required_keys)
+
+    @staticmethod
+    def _build_response_text(action: str, status: str, failure_reason: str) -> str:
+        """Build a human-readable request_context string from action/status/failure_reason."""
+        label = action.replace("_", " ").capitalize() if action else "Action"
+        if status == "success":
+            return f"{label} completed successfully."
+        reason = failure_reason.strip() if failure_reason else "an unknown error occurred"
+        return f"{label} failed: {reason}"
 
     def handle_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         conversation_id = payload.get("conversation_id") or "default-conversation"
@@ -357,89 +473,61 @@ class AccountManagementService:
             self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
             return response
 
-        # ── Strands tool state tracker (per-request closure) ──────────────────
-        tool_state: dict[str, Any] = {
-            "account_found": "no",
-            "locked_at_start": False,
-            "locked_at_end": True,
-            "password_reset": False,
-            "actions": [],
-        }
+        contract_number = str(
+            member_context.get("contractNumber")
+            or payload.get("contractNumber")
+            or ""
+        ).strip()
+        api_result = self.account_api.lookup(intent, contract_number, conversation_id)
 
-        @tool
-        def lookup_account(
-            member_eid: str,
-            member_contract_number: str = "",
-            member_birth_date: str = "",
-            member_zip: str = "",
-            member_group_number: str = "",
-            member_group_suffix: str = "",
-        ) -> str:
-            """Look up a member account to verify identity and check lock status."""
-            has_all = all(
-                f.strip()
-                for f in [member_eid, member_contract_number, member_birth_date,
-                           member_zip, member_group_number, member_group_suffix]
-            )
-            if has_all:
-                tool_state["account_found"] = "yes"
-                tool_state["locked_at_start"] = True
-                return json.dumps({"found": True, "member_eid": member_eid, "locked": True})
-            return json.dumps({"found": False, "reason": "incomplete member context — one or more required fields missing"})
+        api_action = api_result.get("action") or ("unlock_account" if intent == "Account_Unlock" else "reset_password")
+        api_status = api_result.get("status") or "failure"
+        api_failure_reason = api_result.get("failure_reason") or ""
+        response_text = self._build_response_text(api_action, api_status, api_failure_reason)
 
-        @tool
-        def unlock_account(member_eid: str) -> str:
-            """Unlock a locked member account. Call after lookup_account confirms the account is locked."""
-            if not member_eid.strip():
-                tool_state["actions"].append({"action": "unlock_account", "status": "failure", "failure_reason": "member_eid required"})
-                return json.dumps({"success": False, "reason": "member_eid required"})
-            tool_state["locked_at_end"] = False
-            tool_state["actions"].append({"action": "unlock_account", "status": "success", "failure_reason": ""})
-            return json.dumps({"success": True, "member_eid": member_eid})
+        if not bool(api_result.get("found")):
+            response = {
+                "intent": intent,
+                "conversation_id": conversation_id,
+                "account_found": "no",
+                "account_locked_at_start": "no",
+                "account_locked_at_end": "no",
+                "password_reset": "no",
+                "action_detail": [
+                    {
+                        "action": api_action,
+                        "status": api_status,
+                        "failure_reason": api_failure_reason or "account not found",
+                    }
+                ],
+                "request_context": response_text,
+            }
+            self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
+            return response
 
-        @tool
-        def reset_password(member_eid: str) -> str:
-            """Reset the password for a member account. Call after lookup_account confirms the account exists."""
-            if not member_eid.strip():
-                tool_state["actions"].append({"action": "reset_password", "status": "failure", "failure_reason": "member_eid required"})
-                return json.dumps({"success": False, "reason": "member_eid required"})
-            tool_state["password_reset"] = True
-            tool_state["actions"].append({"action": "reset_password", "status": "success", "failure_reason": ""})
-            return json.dumps({"success": True, "member_eid": member_eid, "temp_password_sent": True})
-
-        action_verb = "unlock_account" if intent == "Account_Unlock" else "reset_password"
-        prompt = (
-            f"Intent: {intent}\n"
-            f"Conversation ID: {conversation_id}\n"
-            f"User request: {request_context}\n\n"
-            f"Member context:\n{json.dumps(member_context, indent=2)}\n\n"
-            f"Steps:\n"
-            f"1. Call lookup_account using all values from the member context above.\n"
-            f"2. If the account is found, call {action_verb} with the member_eid.\n"
-            f"3. Summarise the outcome in one or two sentences."
-        )
-        fallback = f"Unable to complete the {intent} request. Please contact support."
-        response_text = self.agent.ask_with_tools(
-            prompt, tools=[lookup_account, unlock_account, reset_password], fallback=fallback
-        )
-
-        if not tool_state["actions"]:
-            tool_state["actions"] = [
-                {
-                    "action": action_verb,
-                    "status": "failure",
-                    "failure_reason": "agent did not invoke required tools",
-                }
-            ]
+        if intent == "Account_Unlock":
+            account_locked_at_start = "yes"
+            account_locked_at_end = "no" if api_status == "success" else "yes"
+            password_reset = "no"
+        else:
+            account_locked_at_start = "no"
+            account_locked_at_end = "no"
+            password_reset = "yes" if api_status == "success" else "no"
 
         response = {
             "intent": intent,
             "conversation_id": conversation_id,
-            "account_found": tool_state["account_found"],
-            "account_locked_at_start": "yes" if tool_state["locked_at_start"] else "no",
-            "account_locked_at_end": "yes" if tool_state["locked_at_end"] else "no",
-            "password_reset": "yes" if tool_state["password_reset"] else "no",
-            "action_detail": tool_state["actions"],
+            "account_found": "yes",
+            "account_locked_at_start": account_locked_at_start,
+            "account_locked_at_end": account_locked_at_end,
+            "password_reset": password_reset,
+            "action_detail": [
+                {
+                    "action": api_action,
+                    "status": api_status,
+                    "failure_reason": api_failure_reason,
+                }
+            ],
             "request_context": response_text,
         }
         self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))

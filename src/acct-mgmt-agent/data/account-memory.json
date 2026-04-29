@@ -56,5 +56,39 @@
       "role": "assistant",
       "text": "I\u2019m unable to unlock your password directly. Please contact your IT administrator and share your username with them. They will initiate the secure unlock process through our identity management system, ensuring proper verification. In production, this will integrate with your enterprise identity provider for a seamless experience. Let me know if you need further assistance or guidance."
     }
+  ],
+  "123": [
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"yes\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"yes\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"success\", \"failure_reason\": \"\"}], \"request_context\": \"Reset password completed successfully.\"}"
+    },
+    {
+      "role": "user",
+      "text": "Reset password completed successfully."
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"no\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"no\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"failure\", \"failure_reason\": \"account not found\"}], \"request_context\": \"Reset password failed: account not found\"}"
+    },
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"no\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"no\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"failure\", \"failure_reason\": \"account not found\"}], \"request_context\": \"Reset password failed: account not found\"}"
+    },
+    {
+      "role": "user",
+      "text": "basic LLM message from direct MCP test"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"yes\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"yes\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"success\", \"failure_reason\": \"\"}], \"request_context\": \"Reset password completed successfully.\"}"
+    }
   ]
 }

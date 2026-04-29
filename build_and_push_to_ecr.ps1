@@ -14,7 +14,8 @@ $Platform = "linux/arm64"
 $Services = @(
     @{ Name = "orchestrator-agent"; Path = "src/orchestrator-agent"; ImageTag = "orchestrator-agent-$ImageTag" },
     @{ Name = "acct-mgmt-agent"; Path = "src/acct-mgmt-agent"; ImageTag = "acct-mgmt-agent-$ImageTag" },
-    @{ Name = "acct-mgnt-mcp"; Path = "src/acct-mgnt-mcp"; ImageTag = "acct-mgnt-mcp-$ImageTag" }
+    @{ Name = "acct-mgnt-mcp"; Path = "src/acct-mgnt-mcp"; ImageTag = "acct-mgnt-mcp-$ImageTag" },
+    @{ Name = "account-api-mcp"; Path = "src/account-api-mcp"; ImageTag = "account-api-mcp-$ImageTag" }
 )
 
 Write-Host "Building and pushing individual images to ECR" -ForegroundColor Cyan
