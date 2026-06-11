@@ -102,24 +102,14 @@ def rpc_call(
     return parse_mcp_response(response)
 
 
-SAMPLE_CONTRACT_BY_INTENT: dict[str, str] = {
-    "Account_Unlock": "918783081",
-    "Account_PW_Reset": "3413623345",
-}
-
-
-def build_sample_tool_args(intent: str) -> dict[str, str]:
-    contract = SAMPLE_CONTRACT_BY_INTENT.get(intent, "918783081")
+def build_sample_tool_args(request_type: str) -> dict[str, str]:
     return {
-        "intent": intent,
-        "conversation_id": "123",
-        "request_context": "basic LLM message from direct MCP test",
-        "member_contract_number": contract,
-        "member_birth_date": "1971-03-11",
-        "member_zip": "49503",
-        "member_eid": "406070601060300",
-        "member_group_number": "00257995",
-        "member_group_suffix": "0004",
+        "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
+        "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+        "request_type": request_type,
+        "member_eid": "70400040700130465465",
+        "delivery_type": "sms",
+        "intent": "Account_Unlock_PW_Reset",
     }
 
 
@@ -177,7 +167,7 @@ def run(args: argparse.Namespace) -> int:
 
         if args.call_sample:
             print(f"\n[3/3] tools/call ({args.tool_name})")
-            tool_args = build_sample_tool_args(args.sample_intent)
+            tool_args = build_sample_tool_args(args.sample_request_type)
             result = rpc_call(
                 url=args.url,
                 method="tools/call",
@@ -234,10 +224,10 @@ def parse_args() -> argparse.Namespace:
         help="Tool name for tools/call (default: orchestrator_invoke).",
     )
     parser.add_argument(
-        "--sample-intent",
-        default="Account_Unlock",
-        choices=["Account_PW_Reset", "Account_Unlock"],
-        help="Intent for sample request.",
+        "--sample-request-type",
+        default="validate_account",
+        choices=["validate_account", "pw_send_link", "end_session"],
+        help="request_type for sample request.",
     )
     args = parser.parse_args()
     args.profile = args.profile.strip() or None
@@ -251,6 +241,6 @@ def main() -> int:
 if __name__ == "__main__":
     sys.exit(main())
 
-#python tests\request_mcp_direct.py --url "https://<your-direct-mcp-endpoint>/mcp" --call-sample --sample-intent Account_Unlock
-#python tests\request_mcp_direct.py --url "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_mcp-Vt2A72DKeq/invocations" --call-sample --sample-intent Account_PW_Reset
+#python tests\request_mcp_direct.py --url "https://<your-direct-mcp-endpoint>/mcp" --call-sample --sample-request-type validate_account
+#python tests\request_mcp_direct.py --url "https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_mcp-Vt2A72DKeq/invocations" --call-sample --sample-request-type pw_send_link
 #python tests\request_mcp_direct.py --url "https://bedrock-agentcore.us-east-1.amazonaws.com/..." --profile <your-profile> --call-sample

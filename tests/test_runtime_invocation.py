@@ -24,18 +24,11 @@ DEFAULT_RUNTIME_URL = (
 )
 
 DEFAULT_PAYLOAD = {
-    "intent": None,
-    "conversation_id": "test-conv-001",
-    "member_context": {
-        "member_contract_number": "918783081",
-        "member_birth_date": "1971-03-11",
-        "member_zip": "49503",
-        "member_eid": "406070601060300",
-        "member_group_number": "00257995",
-        "member_group_suffix": "0004",
-    },
-    "request_context": "smoke test from test_runtime_invocation.py",
-    "user_context": {"subject": "smoke-test-user"},
+    "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
+    "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+    "request_type": "validate_account",
+    "member_eid": "70400040700130465465",
+    "intent": "Account_Unlock_PW_Reset",
 }
 
 
@@ -83,13 +76,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--profile", default=None, help="AWS CLI profile name (optional).")
     parser.add_argument(
         "--message",
-        default="Please unlock my account, I am locked out.",
-        help="Test message to send as request_context.",
+        default="validate_account",
+        help="request_type to send (validate_account, pw_send_link, end_session).",
     )
     parser.add_argument(
         "--conversation-id",
-        default="test-conv-001",
-        help="Conversation ID for the test request.",
+        default="e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+        help="gecx_session_id for the test request.",
     )
     parser.add_argument("--raw", action="store_true", help="Print raw response body instead of pretty JSON.")
     return parser.parse_args()
@@ -99,13 +92,13 @@ def main() -> int:
     args = parse_args()
 
     payload = {**DEFAULT_PAYLOAD}
-    payload["request_context"] = args.message
-    payload["conversation_id"] = args.conversation_id
+    payload["request_type"] = args.message
+    payload["gecx_session_id"] = args.conversation_id
 
     print(f"Runtime URL : {args.url}")
     print(f"AWS Region  : {args.region}")
     print(f"AWS Profile : {args.profile or '<default>'}")
-    print(f"Message     : {args.message}")
+    print(f"Request Type: {args.message}")
     print()
 
     print("Sending signed POST request...")

@@ -233,5 +233,50 @@
         "delivery_mode": "strands_multiagent"
       }
     }
-  ]
+  ],
+  "7a833b7d-5747-407a-a9c9-5781aea9539f": [
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": null, \"request_type\": \"validate_account\", \"member_eid\": \"70400040700130465465\", \"delivery_type\": null, \"intent\": \"Account_Unlock_PW_Reset\"}",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"validate_account\", \"account_found\": true, \"phone_available\": true, \"phone_type_mobile\": false, \"email_available\": true, \"account_status\": \"Locked\", \"request_status\": \"Success\", \"request_status_msg\": \"Account validated\"}",
+      "metadata": {}
+    },
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"pw_send_link\", \"member_eid\": \"70400040700130465465\", \"delivery_type\": \"sms\", \"intent\": \"Account_Unlock_PW_Reset\"}",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"pw_send_link\", \"pw_link_sent\": true, \"request_status\": \"Success\", \"request_status_msg\": \"Password reset link sent\"}",
+      "metadata": {}
+    },
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"end_session\", \"member_eid\": null, \"delivery_type\": null, \"intent\": null}",
+      "metadata": {}
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_status\": \"Success\", \"request_status_msg\": \"Session Ended successfully\"}",
+      "metadata": {}
+    }
+  ],
+  "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217:d86ee6e7-e0f7-4548-b6ab-90b9f867b80f": {
+    "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
+    "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+    "aie_session_id": "d86ee6e7-e0f7-4548-b6ab-90b9f867b80f",
+    "member_eid": "70400040700130465465",
+    "intent": "Account_Unlock_PW_Reset",
+    "active": false,
+    "created_at": "2026-06-11T15:23:33.476238+00:00",
+    "updated_at": "2026-06-11T15:23:35.951791+00:00",
+    "last_request_type": "end_session",
+    "account_status": "Locked",
+    "account_found": true
+  }
 }

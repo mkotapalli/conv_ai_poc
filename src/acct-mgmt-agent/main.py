@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 from a2a.types import AgentSkill
@@ -17,7 +15,7 @@ def build_app() -> FastAPI:
 
     a2a_enabled = SERVICE.settings.get_bool("service.a2a.enabled", True)
     if a2a_enabled:
-        a2a_agent = SERVICE.agent.get_agent()
+        a2a_agent = SERVICE.get_a2a_agent()
         if a2a_agent is not None:
             public_url = SERVICE.settings.get("service.a2a.public_url", "").strip()
             host = SERVICE.settings.get("server.host", "0.0.0.0")
@@ -51,11 +49,13 @@ app = build_app()
 
 
 class AgentRequest(BaseModel):
-    intent: str = Field(default="General")
-    conversation_id: str | None = None
-    member_context: dict[str, str] = Field(default_factory=dict)
-    request_context: str = Field(min_length=1)
-    user_context: dict[str, Any] = Field(default_factory=dict)
+    genesys_conversation_id: str | None = None
+    gecx_session_id: str | None = None
+    aie_session_id: str | None = None
+    request_type: str = Field(min_length=1)
+    member_eid: str | None = None
+    delivery_type: str | None = None
+    intent: str | None = None
 
 
 AgentRequest.model_rebuild()

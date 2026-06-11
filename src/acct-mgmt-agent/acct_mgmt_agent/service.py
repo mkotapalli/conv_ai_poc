@@ -7,9 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import boto3
-import requests
-from botocore.auth import SigV4Auth
-from botocore.awsrequest import AWSRequest
 from strands import Agent
 from strands.models import BedrockModel
 
@@ -67,9 +64,6 @@ class Settings:
             secret_payload = json.loads(response.get("SecretString", "{}"))
             if not isinstance(secret_payload, dict):
                 return {}
-            print(
-                f"Loaded secrets from AWS Secrets Manager '{secret_name}' with keys: {sorted(secret_payload.keys())}"
-            )
         except Exception:
             return {}
 
@@ -140,10 +134,6 @@ class AgentCoreMemoryStore:
         self._memory.setdefault(conversation_id, []).append({"role": role, "text": text})
         self._save()
 
-    def render_history(self, conversation_id: str, limit: int = 6) -> str:
-        recent = self._memory.get(conversation_id, [])[-limit:]
-        return "\n".join(f"{item['role']}: {item['text']}" for item in recent)
-
 
 class StrandsResponder:
     def __init__(self, settings: Settings, system_prompt: str, name: str) -> None:
@@ -157,37 +147,9 @@ class StrandsResponder:
         self.last_error = f"{context}: {exc.__class__.__name__}: {exc}"
         LOGGER.exception(self.last_error)
 
-    def guardrails_enabled(self) -> bool:
-        return self.settings.get_bool("bedrock.guardrail.enabled", False) and bool(
-            self.settings.get("bedrock.guardrail_id")
-        )
-
-    def _guardrail_config(self) -> dict[str, Any]:
-        if not self.guardrails_enabled():
-            return {}
-
-        config: dict[str, Any] = {
-            "guardrail_id": self.settings.get("bedrock.guardrail_id"),
-            "guardrail_version": self.settings.get("bedrock.guardrail_version", "DRAFT"),
-            "guardrail_trace": self.settings.get("bedrock.guardrail_trace", "enabled"),
-            "guardrail_redact_input": self.settings.get_bool("bedrock.guardrail_redact_input", True),
-            "guardrail_redact_output": self.settings.get_bool("bedrock.guardrail_redact_output", True),
-        }
-        stream_mode = self.settings.get("bedrock.guardrail_stream_processing_mode", "sync")
-        if stream_mode:
-            config["guardrail_stream_processing_mode"] = stream_mode
-        return config
-
-    def _block_message(self, fallback: str) -> str:
-        return self.settings.get(
-            "bedrock.guardrail_block_message",
-            fallback or "The request was blocked by AWS Guardrails for safety reasons.",
-        )
-
     def _build_agent(self) -> None:
         if self._agent is not None:
             return
-
         model_id = (
             self.settings.get("bedrock.inference_profile_id")
             or self.settings.get("bedrock.model_id", "amazon.nova-2-lite-v1:0")
@@ -199,7 +161,6 @@ class StrandsResponder:
                 region_name=region,
                 temperature=0.2,
                 max_tokens=self.settings.get_int("bedrock.max_tokens", 1024),
-                **self._guardrail_config(),
             )
             self._agent = Agent(
                 name=self.name,
@@ -215,188 +176,24 @@ class StrandsResponder:
             self._agent = None
             self._record_error(f"Failed to create agent `{self.name}`", exc)
 
-    @staticmethod
-    def _extract_text(result: Any) -> str:
-        message = getattr(result, "message", result)
-        content = getattr(message, "content", None)
-        if content is None and isinstance(message, dict):
-            content = message.get("content", [])
-
-        parts: list[str] = []
-        for block in content or []:
-            text = getattr(block, "text", None)
-            if text is None and isinstance(block, dict):
-                text = block.get("text")
-            if text:
-                parts.append(str(text))
-
-        if parts:
-            return "\n".join(parts).strip()
-        return str(result).strip()
-
-    def ask_text(self, prompt: str, fallback: str) -> str:
-        self._build_agent()
-        if self._agent is None:
-            return fallback
-        try:
-            result = self._agent(prompt)
-            stop_reason = getattr(result, "stop_reason", "")
-            if stop_reason in {"guardrail_intervened", "content_filtered"}:
-                return self._block_message(fallback)
-            text = self._extract_text(result)
-            self.last_error = ""
-            return text or fallback
-        except Exception as exc:
-            self._record_error(f"Failed to execute prompt with `{self.name}`", exc)
-            return fallback
-
-    def ask_with_tools(self, prompt: str, tools: list, fallback: str) -> str:
-        model_id = (
-            self.settings.get("bedrock.inference_profile_id")
-            or self.settings.get("bedrock.model_id", "amazon.nova-2-lite-v1:0")
-        ).strip()
-        region = self.settings.get("aws.region", "us-east-1")
-        try:
-            model = BedrockModel(
-                model_id=model_id,
-                region_name=region,
-                temperature=0.2,
-                max_tokens=self.settings.get_int("bedrock.max_tokens", 1024),
-                **self._guardrail_config(),
-            )
-            agent = Agent(
-                name=self.name,
-                model=model,
-                system_prompt=self.system_prompt,
-                tools=tools,
-            )
-            result = agent(prompt)
-            stop_reason = getattr(result, "stop_reason", "")
-            if stop_reason in {"guardrail_intervened", "content_filtered"}:
-                return self._block_message(fallback)
-            text = self._extract_text(result)
-            self.last_error = ""
-            return text or fallback
-        except Exception as exc:
-            self._record_error(f"Failed to execute prompt with tools in `{self.name}`", exc)
-            return fallback
-
     def get_agent(self) -> Agent | None:
         self._build_agent()
         return self._agent
 
 
-class AccountApiMcpClient:
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.last_error = ""
-
-    def endpoint(self) -> str:
-        return self.settings.get("service.account_api_mcp.url", "").strip()
-
-    def enabled(self) -> bool:
-        return bool(self.endpoint())
-
-    def _signed_headers(self, url: str, body: bytes, headers: dict[str, str]) -> dict[str, str]:
-        region = self.settings.get("aws.region", "us-east-1")
-        session = boto3.Session(region_name=region)
-        credentials = session.get_credentials().get_frozen_credentials()
-        if credentials is None:
-            raise RuntimeError("AWS credentials are not available for SigV4 signing")
-        aws_request = AWSRequest(method="POST", url=url, data=body, headers=headers)
-        SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(aws_request)
-        return dict(aws_request.headers)
-
-    @staticmethod
-    def _parse_mcp_result(response: requests.Response) -> dict[str, Any]:
-        content_type = response.headers.get("content-type", "")
-        text = response.text.strip()
-
-        if "text/event-stream" in content_type or text.startswith("event:"):
-            data_line = next((line for line in text.splitlines() if line.startswith("data:")), "")
-            if not data_line:
-                raise ValueError(f"No data line in MCP SSE response: {text}")
-            payload = json.loads(data_line[len("data:"):].strip())
-        else:
-            payload = response.json()
-
-        content_items = payload.get("result", {}).get("content", [])
-        if not content_items:
-            raise ValueError(f"Unexpected MCP tools/call response: {payload}")
-
-        raw_text = str(content_items[0].get("text", "")).strip()
-        if not raw_text:
-            raise ValueError(f"Empty MCP tools/call result content: {payload}")
-
-        result = json.loads(raw_text)
-        if not isinstance(result, dict):
-            raise ValueError(f"MCP tool response must be a JSON object: {result}")
-        return result
-
-    def lookup(self, intent: str, contract_number: str, conversation_id: str) -> dict[str, Any]:
-        url = self.endpoint()
-        if not url:
-            return {
-                "found": False,
-                "intent": intent,
-                "contractNumber": contract_number,
-                "api_response": "account not found",
-                "error": "service.account_api_mcp.url not configured",
-            }
-
-        payload = {
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": "account_api_lookup",
-                "arguments": {
-                    "intent": intent,
-                    "contract_number": contract_number,
-                },
-            },
-            "id": conversation_id,
-        }
-        body = json.dumps(payload).encode("utf-8")
-        headers = {
-            "Content-Type": "application/json",
-            "Accept": "application/json, text/event-stream",
-        }
-
-        try:
-            timeout_seconds = self.settings.get_int("http.timeout.seconds", 20)
-            if "bedrock-agentcore" in url:
-                headers = self._signed_headers(url, body, headers)
-            response = requests.post(url, data=body, headers=headers, timeout=timeout_seconds)
-            response.raise_for_status()
-            result = self._parse_mcp_result(response)
-            result.setdefault("found", False)
-            result.setdefault("intent", intent)
-            result.setdefault("contractNumber", contract_number)
-            result.setdefault("api_response", "account not found")
-            self.last_error = ""
-            return result
-        except Exception as exc:
-            self.last_error = f"Account API MCP call failed: {exc.__class__.__name__}: {exc}"
-            LOGGER.exception(self.last_error)
-            return {
-                "found": False,
-                "intent": intent,
-                "contractNumber": contract_number,
-                "api_response": "account not found",
-                "error": self.last_error,
-            }
-
-
 class AccountManagementService:
     def __init__(self) -> None:
         self.settings = Settings(CONFIG_PATH)
-        self.system_prompt = PROMPT_PATH.read_text(encoding="utf-8").strip()
+        self.system_prompt = PROMPT_PATH.read_text(encoding="utf-8").strip() if PROMPT_PATH.exists() else ""
         self.memory = AgentCoreMemoryStore(
             storage_path=self.settings.get("memory.storage_path", "data/account-memory.json"),
             provider=self.settings.get("memory.provider", "local"),
         )
         self.agent = StrandsResponder(self.settings, self.system_prompt, "acct-mgmt-agent")
-        self.account_api = AccountApiMcpClient(self.settings)
+        self._member_channel_map: dict[str, dict[str, Any]] = {}
+
+    def get_a2a_agent(self) -> Agent | None:
+        return self.agent.get_agent()
 
     def health(self) -> dict[str, str]:
         return {
@@ -404,131 +201,93 @@ class AccountManagementService:
             "service": self.settings.get("app.name", "acct-mgmt-agent"),
             "memory_provider": self.memory.provider,
             "memory_id": self.settings.get("memory.agentcore.memory_id", ""),
-            "account_api_mcp_url": self.account_api.endpoint(),
-            "account_api_mcp_last_error": self.account_api.last_error,
+            "mode": "stubbed_api",
+            "a2a_enabled": str(self.settings.get_bool("service.a2a.enabled", True)).lower(),
+            "a2a_agent_ready": str(self.get_a2a_agent() is not None).lower(),
             "agent_last_error": self.agent.last_error,
-            "guardrails_enabled": str(self.agent.guardrails_enabled()).lower(),
-            "guardrail_id": self.settings.get("bedrock.guardrail_id", ""),
         }
 
-    @staticmethod
-    def _normalize_intent(raw_intent: str) -> str:
-        normalized = raw_intent.strip().lower().replace(" ", "_")
-        if normalized in {"account_pw_reset", "account_reset", "password_reset", "reset_password"}:
-            return "Account_PW_Reset"
-        if normalized in {"account_unlock", "password_unlock", "unlock_account"}:
-            return "Account_Unlock"
-        return "General"
-
-    @staticmethod
-    def _member_context_complete(member_context: dict[str, Any]) -> bool:
-        required_keys = [
-            "contractNumber",
-            "birthDate",
-            "zip",
-            "eid",
-            "groupNumber",
-            "groupSuffix",
-        ]
-        return all(str(member_context.get(key, "")).strip() for key in required_keys)
-
-    @staticmethod
-    def _build_response_text(action: str, status: str, failure_reason: str) -> str:
-        """Build a human-readable request_context string from action/status/failure_reason."""
-        label = action.replace("_", " ").capitalize() if action else "Action"
-        if status == "success":
-            return f"{label} completed successfully."
-        reason = failure_reason.strip() if failure_reason else "an unknown error occurred"
-        return f"{label} failed: {reason}"
+    def _stub_member_channels(self, member_eid: str) -> dict[str, Any]:
+        # Deterministic local stub behavior until real API integration is wired.
+        last_digit = int(member_eid[-1]) if member_eid and member_eid[-1].isdigit() else 0
+        account_found = bool(member_eid)
+        account_status = "Locked" if last_digit in {5, 7, 9} else "Enabled"
+        channels = {
+            "account_found": account_found,
+            "phone_available": account_found,
+            "phone_type_mobile": account_found and last_digit % 2 == 0,
+            "email_available": account_found,
+            "account_status": account_status,
+        }
+        if member_eid:
+            self._member_channel_map[member_eid] = channels
+        return channels
 
     def handle_request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        conversation_id = payload.get("conversation_id") or "default-conversation"
-        intent = self._normalize_intent(str(payload.get("intent", "General")))
-        request_context = str(payload.get("request_context") or payload.get("message", "")).strip()
-        member_context = dict(payload.get("member_context") or {})
-        user_context = dict(payload.get("user_context") or {})
-        memory_id = self.settings.get("memory.agentcore.memory_id", "").strip()
-        if memory_id and "memory_id" not in user_context:
-            user_context["memory_id"] = memory_id
+        genesys_conversation_id = str(payload.get("genesys_conversation_id") or "").strip()
+        gecx_session_id = str(payload.get("gecx_session_id") or "").strip()
+        aie_session_id = str(payload.get("aie_session_id") or "").strip()
+        request_type = str(payload.get("request_type") or "").strip()
+        intent = str(payload.get("intent") or "").strip()
+        member_eid = str(payload.get("member_eid") or "").strip()
+        delivery_type = str(payload.get("delivery_type") or "").strip().lower()
 
-        self.memory.append(conversation_id, "user", request_context)
+        conversation_key = genesys_conversation_id or gecx_session_id or "default-conversation"
+        self.memory.append(conversation_key, "user", json.dumps(payload, default=str))
 
-        if intent not in {"Account_Unlock", "Account_PW_Reset"}:
+        if request_type == "validate_account":
+            channels = self._stub_member_channels(member_eid)
             response = {
-                "intent": "General",
-                "conversation_id": conversation_id,
-                "account_found": "no",
-                "account_locked_at_start": "no",
-                "account_locked_at_end": "no",
-                "password_reset": "no",
-                "action_detail": [
-                    {
-                        "action": "route_request",
-                        "status": "failure",
-                        "failure_reason": "unsupported intent for account action flow",
-                    }
-                ],
-                "request_context": request_context,
+                "genesys_conversation_id": genesys_conversation_id,
+                "gecx_session_id": gecx_session_id,
+                "aie_session_id": aie_session_id,
+                "request_type": "validate_account",
+                "account_found": channels["account_found"],
+                "phone_available": channels["phone_available"],
+                "phone_type_mobile": channels["phone_type_mobile"],
+                "email_available": channels["email_available"],
+                "account_status": channels["account_status"],
+                "request_status": "Success" if channels["account_found"] else "Failure",
+                "request_status_msg": "Account validated" if channels["account_found"] else "Member account not found",
             }
-            self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
+            self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
             return response
 
-        contract_number = str(
-            member_context.get("contractNumber")
-            or payload.get("contractNumber")
-            or ""
-        ).strip()
-        api_result = self.account_api.lookup(intent, contract_number, conversation_id)
+        if request_type == "pw_send_link":
+            channels = self._member_channel_map.get(member_eid) or self._stub_member_channels(member_eid)
+            if delivery_type not in {"sms", "email"}:
+                response = {
+                    "genesys_conversation_id": genesys_conversation_id,
+                    "gecx_session_id": gecx_session_id,
+                    "aie_session_id": aie_session_id,
+                    "request_type": "pw_send_link",
+                    "pw_link_sent": False,
+                    "request_status": "Failure",
+                    "request_status_msg": "Unsupported delivery_type. Use sms or email.",
+                }
+                self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
+                return response
 
-        api_action = api_result.get("action") or ("unlock_account" if intent == "Account_Unlock" else "reset_password")
-        api_status = api_result.get("status") or "failure"
-        api_failure_reason = api_result.get("failure_reason") or ""
-        response_text = self._build_response_text(api_action, api_status, api_failure_reason)
-
-        if not bool(api_result.get("found")):
+            channel_available = channels["phone_available"] if delivery_type == "sms" else channels["email_available"]
             response = {
-                "intent": intent,
-                "conversation_id": conversation_id,
-                "account_found": "no",
-                "account_locked_at_start": "no",
-                "account_locked_at_end": "no",
-                "password_reset": "no",
-                "action_detail": [
-                    {
-                        "action": api_action,
-                        "status": api_status,
-                        "failure_reason": api_failure_reason or "account not found",
-                    }
-                ],
-                "request_context": response_text,
+                "genesys_conversation_id": genesys_conversation_id,
+                "gecx_session_id": gecx_session_id,
+                "aie_session_id": aie_session_id,
+                "request_type": "pw_send_link",
+                "pw_link_sent": bool(channel_available),
+                "request_status": "Success" if channel_available else "Failure",
+                "request_status_msg": "Password reset link sent" if channel_available else f"{delivery_type} delivery channel not available",
             }
-            self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
+            self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
             return response
-
-        if intent == "Account_Unlock":
-            account_locked_at_start = "yes"
-            account_locked_at_end = "no" if api_status == "success" else "yes"
-            password_reset = "no"
-        else:
-            account_locked_at_start = "no"
-            account_locked_at_end = "no"
-            password_reset = "yes" if api_status == "success" else "no"
 
         response = {
-            "intent": intent,
-            "conversation_id": conversation_id,
-            "account_found": "yes",
-            "account_locked_at_start": account_locked_at_start,
-            "account_locked_at_end": account_locked_at_end,
-            "password_reset": password_reset,
-            "action_detail": [
-                {
-                    "action": api_action,
-                    "status": api_status,
-                    "failure_reason": api_failure_reason,
-                }
-            ],
-            "request_context": response_text,
+            "genesys_conversation_id": genesys_conversation_id,
+            "gecx_session_id": gecx_session_id,
+            "aie_session_id": aie_session_id,
+            "request_type": request_type,
+            "request_status": "Failure",
+            "request_status_msg": f"Unsupported request_type: {request_type or 'missing'} for intent {intent or 'unknown'}",
         }
-        self.memory.append(conversation_id, "assistant", json.dumps(response, default=str))
+        self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
         return response

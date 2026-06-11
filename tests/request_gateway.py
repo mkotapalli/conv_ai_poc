@@ -21,17 +21,14 @@ DEFAULT_GATEWAY_URL = (
 )
 
 
-def build_sample_tool_args(intent: str) -> dict[str, str]:
+def build_sample_tool_args(request_type: str) -> dict[str, str]:
     return {
-        "intent": intent,
-        "conversation_id": "123",
-        "request_context": "basic LLM message from GCP",
-        "member_contract_number": "918783081",
-        "member_birth_date": "1971-03-11",
-        "member_zip": "49503",
-        "member_eid": "406070601060300",
-        "member_group_number": "00257995",
-        "member_group_suffix": "0004",
+        "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
+        "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+        "request_type": request_type,
+        "member_eid": "70400040700130465465",
+        "delivery_type": "sms",
+        "intent": "Account_Unlock_PW_Reset",
     }
 
 
@@ -64,7 +61,7 @@ async def run_test(
     api_key_env: str,
     skip_resources: bool,
     call_sample: bool,
-    sample_intent: str,
+    sample_request_type: str,
 ) -> int:
     headers = build_headers(token_env=token_env, api_key_env=api_key_env)
 
@@ -107,7 +104,7 @@ async def run_test(
 
                 if call_sample:
                     print("\n[4/4] call_tool('bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke') sample request")
-                    tool_args = build_sample_tool_args(sample_intent)
+                    tool_args = build_sample_tool_args(sample_request_type)
                     call_result = await session.call_tool("bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke", arguments=tool_args)
                     content = _safe_get(call_result, "content", [])
                     print("  Request:")
@@ -155,10 +152,10 @@ def parse_args() -> argparse.Namespace:
         help="Call orchestrator_invoke with a sample payload after checks.",
     )
     parser.add_argument(
-        "--sample-intent",
-        default="Account_PW_Reset",
-        choices=["Account_PW_Reset", "Account_Unlock"],
-        help="Intent value used for --call-sample.",
+        "--sample-request-type",
+        default="validate_account",
+        choices=["validate_account", "pw_send_link", "end_session"],
+        help="request_type value used for --call-sample.",
     )
     return parser.parse_args()
 
@@ -173,7 +170,7 @@ def main() -> int:
             api_key_env=args.api_key_env,
             skip_resources=args.skip_resources,
             call_sample=args.call_sample,
-            sample_intent=args.sample_intent,
+            sample_request_type=args.sample_request_type,
         )
     )
 

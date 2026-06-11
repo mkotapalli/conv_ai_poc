@@ -1,0 +1,10 @@
+{
+  "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217": {
+    "aie_session_id": "ba331359-0c4c-4961-9b50-fda1323f8ea5",
+    "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
+    "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+    "member_eid": "70400040700130465465",
+    "intent": "Account_Unlock_PW_Reset",
+    "active": false
+  }
+}

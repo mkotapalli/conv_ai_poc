@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import FastAPI
 from pydantic import BaseModel, Field
 
@@ -11,11 +9,13 @@ SERVICE = OrchestratorService()
 app = FastAPI(title="Orchestrator Agent", version="0.1.0")
 
 class RequestEnvelope(BaseModel):
+    genesys_conversation_id: str | None = None
+    gecx_session_id: str | None = None
+    aie_session_id: str | None = None
+    request_type: str = Field(min_length=1)
+    member_eid: str | None = None
+    delivery_type: str | None = None
     intent: str | None = None
-    conversation_id: str | None = None
-    member_context: dict[str, str] = Field(default_factory=dict)
-    request_context: str = Field(min_length=1)
-    user_context: dict[str, Any] = Field(default_factory=dict)
 
 
 RequestEnvelope.model_rebuild()

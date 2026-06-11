@@ -90,5 +90,39 @@
       "role": "assistant",
       "text": "{\"intent\": \"Account_PW_Reset\", \"conversation_id\": \"123\", \"account_found\": \"yes\", \"account_locked_at_start\": \"no\", \"account_locked_at_end\": \"no\", \"password_reset\": \"yes\", \"action_detail\": [{\"action\": \"reset_password\", \"status\": \"success\", \"failure_reason\": \"\"}], \"request_context\": \"Reset password completed successfully.\"}"
     }
+  ],
+  "7a833b7d-5747-407a-a9c9-5781aea9539f": [
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"validate_account\", \"member_eid\": \"70400040700130465465\", \"delivery_type\": \"\", \"intent\": \"Account_Unlock_PW_Reset\"}"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"validate_account\", \"account_found\": true, \"phone_available\": true, \"phone_type_mobile\": false, \"email_available\": true, \"account_status\": \"Locked\", \"request_status\": \"Success\", \"request_status_msg\": \"Account validated\"}"
+    },
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"pw_send_link\", \"member_eid\": \"70400040700130465465\", \"delivery_type\": \"sms\", \"intent\": \"Account_Unlock_PW_Reset\"}"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"ba331359-0c4c-4961-9b50-fda1323f8ea5\", \"request_type\": \"pw_send_link\", \"pw_link_sent\": true, \"request_status\": \"Success\", \"request_status_msg\": \"Password reset link sent\"}"
+    },
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"d86ee6e7-e0f7-4548-b6ab-90b9f867b80f\", \"request_type\": \"validate_account\", \"member_eid\": \"70400040700130465465\", \"delivery_type\": \"\", \"intent\": \"Account_Unlock_PW_Reset\"}"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"d86ee6e7-e0f7-4548-b6ab-90b9f867b80f\", \"request_type\": \"validate_account\", \"account_found\": true, \"phone_available\": true, \"phone_type_mobile\": false, \"email_available\": true, \"account_status\": \"Locked\", \"request_status\": \"Success\", \"request_status_msg\": \"Account validated\"}"
+    },
+    {
+      "role": "user",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"d86ee6e7-e0f7-4548-b6ab-90b9f867b80f\", \"request_type\": \"pw_send_link\", \"member_eid\": \"70400040700130465465\", \"delivery_type\": \"sms\", \"intent\": \"Account_Unlock_PW_Reset\"}"
+    },
+    {
+      "role": "assistant",
+      "text": "{\"genesys_conversation_id\": \"7a833b7d-5747-407a-a9c9-5781aea9539f\", \"gecx_session_id\": \"e97b4552-a8bc-4c0a-a3d1-5029c1a5f217\", \"aie_session_id\": \"d86ee6e7-e0f7-4548-b6ab-90b9f867b80f\", \"request_type\": \"pw_send_link\", \"pw_link_sent\": true, \"request_status\": \"Success\", \"request_status_msg\": \"Password reset link sent\"}"
+    }
   ]
 }

@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -72,25 +71,29 @@ class OrchestratorBridge:
     def invoke(
         self,
         *,
-        intent: str,
-        request_context: str,
-        conversation_id: str | None,
-        member_context: dict[str, Any] | None,
-        user_context: dict[str, Any] | None,
+        genesys_conversation_id: str | None,
+        gecx_session_id: str | None,
+        aie_session_id: str | None,
+        request_type: str,
+        member_eid: str | None,
+        delivery_type: str | None,
+        intent: str | None,
     ) -> dict[str, Any]:
         if not self.orchestrator_url:
             raise RuntimeError("Orchestrator URL is missing from configuration.")
 
-        normalized_request_context = request_context.strip()
-        if not normalized_request_context:
-            raise ValueError("A non-empty request_context is required.")
+        normalized_request_type = request_type.strip()
+        if not normalized_request_type:
+            raise ValueError("A non-empty request_type is required.")
 
         payload = {
-            "intent": intent,
-            "conversation_id": conversation_id or str(uuid.uuid4()),
-            "member_context": member_context or {},
-            "request_context": normalized_request_context,
-            "user_context": user_context or {},
+            "genesys_conversation_id": (genesys_conversation_id or "").strip(),
+            "gecx_session_id": (gecx_session_id or "").strip(),
+            "aie_session_id": (aie_session_id or "").strip(),
+            "request_type": normalized_request_type,
+            "member_eid": (member_eid or "").strip(),
+            "delivery_type": (delivery_type or "").strip().lower(),
+            "intent": (intent or "").strip(),
         }
         headers = {"content-type": "application/json"}
         timeout_seconds = self.settings.get_int("http.timeout.seconds", 30)
@@ -124,8 +127,6 @@ class OrchestratorBridge:
             )
         response.raise_for_status()
         result = response.json()
-        if isinstance(result, dict):
-            result.setdefault("conversation_id", payload["conversation_id"])
         return result
 
 
@@ -215,43 +216,22 @@ def runtime_registration_resource() -> str:
     ),
 )
 def orchestrator_invoke(
-    intent: Optional[str] = None,
-    request_context: Optional[str] = None,
-    conversation_id: Optional[str] = None,
-    member_contract_number: Optional[str] = None,
-    member_birth_date: Optional[str] = None,
-    member_zip: Optional[str] = None,
+    genesys_conversation_id: Optional[str] = None,
+    gecx_session_id: Optional[str] = None,
+    aie_session_id: Optional[str] = None,
+    request_type: Optional[str] = None,
     member_eid: Optional[str] = None,
-    member_group_number: Optional[str] = None,
-    member_group_suffix: Optional[str] = None,
+    delivery_type: Optional[str] = None,
+    intent: Optional[str] = None,
 ) -> str:
-    normalized_request_context = (request_context or "").strip()
-
-    user_context: dict[str, Any] = {}
-    resolved_memory_id = SETTINGS.get("memory.agentcore.memory_id", "").strip()
-    if resolved_memory_id:
-        user_context["memory_id"] = resolved_memory_id
-
-    member_context: dict[str, Any] = {}
-    if member_contract_number:
-        member_context["contractNumber"] = member_contract_number
-    if member_birth_date:
-        member_context["birthDate"] = member_birth_date
-    if member_zip:
-        member_context["zip"] = member_zip
-    if member_eid:
-        member_context["eid"] = member_eid
-    if member_group_number:
-        member_context["groupNumber"] = member_group_number
-    if member_group_suffix:
-        member_context["groupSuffix"] = member_group_suffix
-
     result = BRIDGE.invoke(
+        genesys_conversation_id=(genesys_conversation_id or "").strip(),
+        gecx_session_id=(gecx_session_id or "").strip(),
+        aie_session_id=(aie_session_id or "").strip(),
+        request_type=(request_type or "").strip(),
+        member_eid=(member_eid or "").strip(),
+        delivery_type=(delivery_type or "").strip().lower(),
         intent=(intent or "").strip(),
-        request_context=normalized_request_context,
-        conversation_id=conversation_id,
-        member_context=member_context,
-        user_context=user_context,
     )
 
     if isinstance(result, dict):

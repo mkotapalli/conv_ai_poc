@@ -52,9 +52,11 @@ orchestrator_module.SERVICE.call_account_agent = fake_account_call
 response = orchestrator_client.post(
     "/orchestrate",
     json={
-        "conversation_id": "conv-smoke-1",
-        "message": "Please unlock my password because I am locked out.",
-        "user_context": {"subject": "local-smoke"},
+        "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
+        "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+        "request_type": "validate_account",
+        "member_eid": "70400040700130465465",
+        "intent": "Account_Unlock_PW_Reset",
     },
 )
 

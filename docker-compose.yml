@@ -24,25 +24,15 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
       AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
-      SERVICE_ACCOUNT_API_MCP_URL: ${SERVICE_ACCOUNT_API_MCP_URL:-http://account-api-mcp:8000/mcp}
     volumes:
       - ${USERPROFILE}/.aws:/root/.aws:ro
-    depends_on:
-      - account-api-mcp
-
-  account-api-mcp:
-    build:
-      context: ./src/account-api-mcp
-    container_name: account-api-mcp
-    ports:
-      - "8084:8000"
 
   acct-mgnt-mcp:
     build:
       context: ./src/acct-mgnt-mcp
     container_name: acct-mgnt-mcp
     ports:
-      - "8083:8083"
+      - "8083:8000"
     environment:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}

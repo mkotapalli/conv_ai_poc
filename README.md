@@ -1,19 +1,25 @@
 # AgentCore POC for Account Access
 
-This repository contains a **3-service FastAPI proof of concept** for an AWS-hosted conversation AI flow:
+This repository contains a **3-service FastAPI proof of concept** for account recovery with stubbed API behavior:
 
-- `src/orchestrator-agent` – uses **Strands SDK** plus **Bedrock model configuration** to classify intent and route password requests, using **mandatory Strands A2A handoff** to the account-management agent.
-- `src/acct-mgmt-agent` – uses **Strands SDK** plus **Bedrock model configuration** to answer password reset/unlock prompts.
-- `src/acct-mgnt-mcp` – **MCP (Model Context Protocol) server** that bridges AWS AgentCore Gateway to the orchestrator, enabling tool/resource invocation.
+- `src/orchestrator-agent` – routes request_type calls, generates `aie_session_id`, and manages active sessions.
+- `src/acct-mgmt-agent` – returns stubbed account validation and password-link responses (no LLM required).
+- `src/acct-mgnt-mcp` – MCP (Model Context Protocol) server that bridges AgentCore Gateway to orchestrator-agent.
 
-## Key design points
+## Supported request types
 
-- **FastAPI everywhere**
-- **Properties-file driven configuration** for easy environment promotion
-- **Mandatory Strands A2A orchestration** from `orchestrator-agent` to `acct-mgmt-agent`
-- **UI/Gateway-side IAM authentication** with no service-level SigV4 enforcement in these modules
-- **AgentCore-style memory abstraction** with local fallback for laptop development
-- **Dedicated Dockerfile and requirements** per component for independent deployment
+- `validate_account`
+- `pw_send_link`
+- `end_session`
+
+Expected key fields are:
+
+- `genesys_conversation_id`
+- `gecx_session_id`
+- `request_type`
+- `member_eid` (for validate/link)
+- `delivery_type` (sms/email for link)
+- `aie_session_id` (for link/end_session)
 
 ## Local run
 
@@ -50,8 +56,7 @@ c:/projects/gen_agent_ai/.venv/Scripts/python.exe smoke_test.py
 
 ## Deployment notes
 
-- Update each `config/application.properties` file with your **AWS region**, **Bedrock model ID**, **Okta issuer/audience/JWKS**, **Guardrail ID/version**, and service URLs.
-- Set `bedrock.guardrail.enabled=true` plus `bedrock.guardrail_id=<your-guardrail-id>` in both agent properties files to enable **AWS Guardrails**.
+- Update each `config/application.properties` file with your AWS region, secrets manager settings, and service URLs.
 - For production, place `orchestrator-agent` and `acct-mgnt-mcp` behind API Gateway / ALB and enforce IAM authentication at the UI/gateway layer.
-- From a Linux bastion host, build and push images with `./build_and_push_to_ecr.sh --image-tag latest`. Run `chmod +x build_and_push_to_ecr.sh` once if needed.
-- The memory abstraction is intentionally **POC-safe**: it runs locally today and can be swapped to a managed AgentCore memory provider later.
+- From a Linux bastion host, build and push images with `./build_and_push_to_ecr.sh --image-tag latest`.
+- Session state is persisted by orchestrator under local data storage and keyed by `gecx_session_id`.
