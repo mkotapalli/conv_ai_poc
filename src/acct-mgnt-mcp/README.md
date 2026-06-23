@@ -6,11 +6,9 @@ The MCP (Model Context Protocol) server bridges AWS AgentCore Gateway to the orc
 
 ```
 AWS AgentCore Gateway
-         ↓
+     ↓
    acct-mgnt-mcp (MCP Server - Port 8083)
-         ↓
-   orchestrator-agent (Port 8081)
-         ↓
+     ↓
    acct-mgmt-agent (Port 8082)
 ```
 
@@ -21,7 +19,8 @@ AWS AgentCore Gateway
 - **account://account-unlock** - Account unlock request handling
 
 ### Tools
-- **orchestrator_invoke** - Forward a user message from AgentCore Gateway to `orchestrator-agent`
+- **account_management_invoke** - Forward a user message from AgentCore Gateway directly to `acct-mgmt-agent`
+- **orchestrator_invoke** - Backward-compatible alias for `account_management_invoke`
 
 ## Configuration
 
@@ -89,7 +88,7 @@ curl -X POST http://localhost:8083/mcp \
     "jsonrpc": "2.0",
     "method": "tools/call",
     "params": {
-      "name": "orchestrator_invoke",
+      "name": "account_management_invoke",
       "arguments": {
         "intent": "Account_PW_Reset",
         "request_context": "I forgot my password",
@@ -206,6 +205,7 @@ To register this MCP server as a tool server in AgentCore Gateway:
 2. In AgentCore Gateway, create a new MCP integration that points at the runtime endpoint URL.
 3. Configure the integration to use the runtime MCP path `/mcp`.
 4. Expose the `orchestrator_invoke` tool to the gateway workflow.
+4. Expose the `account_management_invoke` tool to the gateway workflow. The legacy `orchestrator_invoke` alias remains available for compatibility.
 
 ## Files
 

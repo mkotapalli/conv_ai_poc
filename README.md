@@ -2,9 +2,9 @@
 
 This repository contains a **3-service FastAPI proof of concept** for account recovery with stubbed API behavior:
 
-- `src/orchestrator-agent` – routes request_type calls, generates `aie_session_id`, and manages active sessions.
-- `src/acct-mgmt-agent` – returns stubbed account validation and password-link responses (no LLM required).
-- `src/acct-mgnt-mcp` – MCP (Model Context Protocol) server that bridges AgentCore Gateway to orchestrator-agent.
+- `src/orchestrator-agent` – legacy routing layer for compatibility and session handoff.
+- `src/acct-mgmt-agent` – owns `aie_session_id`, returns stubbed account validation and password-link responses, and exposes easy API adapter hooks.
+- `src/acct-mgnt-mcp` – MCP (Model Context Protocol) server that bridges AgentCore Gateway directly to acct-mgmt-agent.
 
 ## Supported request types
 
@@ -19,7 +19,7 @@ Expected key fields are:
 - `request_type`
 - `member_eid` (for validate/link)
 - `delivery_type` (sms/email for link)
-- `aie_session_id` (for link/end_session)
+- `aie_session_id` (created by acct-mgmt-agent during validate_account and reused for link/end_session)
 
 ## Local run
 

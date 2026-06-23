@@ -10,10 +10,7 @@ AgentCore Gateway (Okta-protected, MCP)
    │  SigV4
    ▼
 acct-mgnt-mcp Runtime  (MCP server, port 8000)
-   │  SigV4  SERVICE_ORCHESTRATOR_URL
-   ▼
-orchestrator-agent Runtime  (HTTP /invocations, port 8080)
-   │  SigV4  SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL
+  │  SigV4  SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL
    ▼
 acct-mgmt-agent Runtime  (HTTP /invocations, port 8080)
 ```
@@ -118,10 +115,10 @@ AWS_REGION=us-east-1
 AWS_SECRETSMANAGER_ENABLED=true
 AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets
 MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d
-SERVICE_ORCHESTRATOR_URL=https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_orchestrator-GEkw1YGeCY/invocations?qualifier=bcbs_dev_orchestrator_endpoint
+SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL=https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_acct_mgnt-8xi3SACIES/invocations?qualifier=bcbs_dev_acct_mgmt_endpoint
 ```
 
-- `SERVICE_ORCHESTRATOR_URL` must be the fully URL-encoded AgentCore invocations URL for orchestrator-agent.
+- `SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL` must be the fully URL-encoded AgentCore invocations URL for acct-mgmt-agent.
 - Exposes `/mcp` (MCP streamable HTTP).
 
 ---
@@ -135,17 +132,17 @@ Summary of inline policies to add:
 
 | Role (suffix) | Policy name | Allows |
 |---|---|---|
-| `-zix3c` (MCP) | `AllowInvokeOrchestratorRuntime` | `InvokeRuntime` on orchestrator ARN |
+| `-zix3c` (MCP) | `AllowInvokeAcctRuntime` | `InvokeRuntime` on acct-mgmt ARN |
 | `-kugos` (Orchestrator) | `AllowInvokeAcctRuntime` | `InvokeRuntime` on acct-mgmt ARN |
 
 Apply:
 
 ```powershell
-# MCP role -> orchestrator
+# MCP role -> acct-mgmt
 aws iam put-role-policy `
   --role-name "AmazonBedrockAgentCoreRuntimeDefaultServiceRole-zix3c" `
-  --policy-name "AllowInvokeOrchestratorRuntime" `
-  --policy-document file://iam/allow-invoke-orchestrator.json
+  --policy-name "AllowInvokeAcctRuntime" `
+  --policy-document file://iam/allow-invoke-acct.json
 
 # Orchestrator role -> acct-mgmt
 aws iam put-role-policy `

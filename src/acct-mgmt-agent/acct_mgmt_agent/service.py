@@ -3,10 +3,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import random
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import boto3
+import requests
 from strands import Agent
 from strands.models import BedrockModel
 
@@ -135,6 +139,74 @@ class AgentCoreMemoryStore:
         self._save()
 
 
+class AccountSessionStore:
+    def __init__(self, storage_path: str) -> None:
+        self.storage_path = Path(storage_path)
+        if not self.storage_path.is_absolute():
+            self.storage_path = SERVICE_ROOT / self.storage_path
+        self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+        self._sessions = self._load()
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        if not self.storage_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.storage_path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+
+    def _save(self) -> None:
+        self.storage_path.write_text(json.dumps(self._sessions, indent=2), encoding="utf-8")
+
+    def create(self, state: dict[str, Any]) -> str:
+        session_id = str(state.get("aie_session_id") or "").strip() or str(uuid.uuid4())
+        state["aie_session_id"] = session_id
+        self._sessions[session_id] = state
+        self._save()
+        return session_id
+
+    def load(self, aie_session_id: str) -> dict[str, Any] | None:
+        return self._sessions.get(aie_session_id)
+
+    def save(self, aie_session_id: str, state: dict[str, Any]) -> None:
+        self._sessions[aie_session_id] = state
+        self._save()
+
+
+class AccountApiClient:
+    def __init__(self, settings: Settings) -> None:
+        self.settings = settings
+        self.last_error = ""
+
+    def _endpoint(self, key: str) -> str:
+        return self.settings.get(key, "").strip()
+
+    def _call(self, endpoint: str, payload: dict[str, Any]) -> dict[str, Any] | None:
+        if not endpoint:
+            return None
+
+        timeout_seconds = self.settings.get_int("http.timeout.seconds", 20)
+        try:
+            response = requests.post(endpoint, json=payload, timeout=timeout_seconds)
+            response.raise_for_status()
+            result = response.json()
+            if isinstance(result, dict):
+                self.last_error = ""
+                return result
+            return {"raw_response": result}
+        except Exception as exc:
+            self.last_error = f"{exc.__class__.__name__}: {exc}"
+            LOGGER.exception("API call failed for %s", endpoint)
+            return None
+
+    def call_account_validation_api(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        return self._call(self._endpoint("service.api.account_validation_url"), payload)
+
+    def call_send_link_api(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        return self._call(self._endpoint("service.api.send_link_url"), payload)
+
+
 class StrandsResponder:
     def __init__(self, settings: Settings, system_prompt: str, name: str) -> None:
         self.settings = settings
@@ -189,6 +261,14 @@ class AccountManagementService:
             storage_path=self.settings.get("memory.storage_path", "data/account-memory.json"),
             provider=self.settings.get("memory.provider", "local"),
         )
+        self.session_store = AccountSessionStore(
+            storage_path=self.settings.get("session.storage_path", "data/account-sessions.json"),
+        )
+        self.api_client = AccountApiClient(self.settings)
+        self._rng = random.Random()
+        random_seed = self.settings.get("service.stub.random_seed", "").strip()
+        if random_seed:
+            self._rng.seed(random_seed)
         self.agent = StrandsResponder(self.settings, self.system_prompt, "acct-mgmt-agent")
         self._member_channel_map: dict[str, dict[str, Any]] = {}
 
@@ -202,26 +282,189 @@ class AccountManagementService:
             "memory_provider": self.memory.provider,
             "memory_id": self.settings.get("memory.agentcore.memory_id", ""),
             "mode": "stubbed_api",
+            "session_store": self.settings.get("session.storage_path", "data/account-sessions.json"),
+            "account_validation_api_url": self.settings.get("service.api.account_validation_url", ""),
+            "send_link_api_url": self.settings.get("service.api.send_link_url", ""),
             "a2a_enabled": str(self.settings.get_bool("service.a2a.enabled", True)).lower(),
             "a2a_agent_ready": str(self.get_a2a_agent() is not None).lower(),
             "agent_last_error": self.agent.last_error,
+            "api_last_error": self.api_client.last_error,
         }
 
-    def _stub_member_channels(self, member_eid: str) -> dict[str, Any]:
-        # Deterministic local stub behavior until real API integration is wired.
+    def _pick_stub_success(self) -> bool:
+        return self._rng.random() >= 0.5
+
+    def _stub_member_channels(self, member_eid: str, *, account_found: bool) -> dict[str, Any]:
         last_digit = int(member_eid[-1]) if member_eid and member_eid[-1].isdigit() else 0
-        account_found = bool(member_eid)
-        account_status = "Locked" if last_digit in {5, 7, 9} else "Enabled"
+        account_status = "Locked" if account_found and last_digit in {5, 7, 9} else "Enabled"
         channels = {
             "account_found": account_found,
-            "phone_available": account_found,
+            "phone_available": account_found and last_digit % 3 != 1,
             "phone_type_mobile": account_found and last_digit % 2 == 0,
-            "email_available": account_found,
+            "email_available": account_found and last_digit % 2 == 1,
             "account_status": account_status,
         }
         if member_eid:
             self._member_channel_map[member_eid] = channels
         return channels
+
+    def _create_session(self, *, genesys_conversation_id: str, gecx_session_id: str, member_eid: str, intent: str, account_status: str, account_found: bool) -> str:
+        session_id = str(uuid.uuid4())
+        self.session_store.save(
+            session_id,
+            {
+                "genesys_conversation_id": genesys_conversation_id,
+                "gecx_session_id": gecx_session_id,
+                "aie_session_id": session_id,
+                "member_eid": member_eid,
+                "intent": intent,
+                "account_status": account_status,
+                "account_found": account_found,
+                "active": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "last_request_type": "validate_account",
+            },
+        )
+        return session_id
+
+    def _build_validation_response(self, payload: dict[str, Any]) -> dict[str, Any]:
+        genesys_conversation_id = str(payload.get("genesys_conversation_id") or "").strip()
+        gecx_session_id = str(payload.get("gecx_session_id") or "").strip()
+        member_eid = str(payload.get("member_eid") or "").strip()
+        intent = str(payload.get("intent") or "").strip()
+
+        api_result = self.api_client.call_account_validation_api(payload)
+        if isinstance(api_result, dict):
+            aie_session_id = str(api_result.get("aie_session_id") or "").strip() or self._create_session(
+                genesys_conversation_id=genesys_conversation_id,
+                gecx_session_id=gecx_session_id,
+                member_eid=member_eid,
+                intent=intent,
+                account_status=str(api_result.get("account_status", "")),
+                account_found=bool(api_result.get("account_found", True)),
+            )
+            api_result.setdefault("genesys_conversation_id", genesys_conversation_id)
+            api_result.setdefault("gecx_session_id", gecx_session_id)
+            api_result.setdefault("aie_session_id", aie_session_id)
+            api_result.setdefault("request_type", "validate_account")
+            api_result.setdefault("request_status", "Success")
+            api_result.setdefault("request_status_msg", "Account validated")
+            return api_result
+
+        success = self._pick_stub_success()
+        channels = self._stub_member_channels(member_eid, account_found=success)
+        aie_session_id = self._create_session(
+            genesys_conversation_id=genesys_conversation_id,
+            gecx_session_id=gecx_session_id,
+            member_eid=member_eid,
+            intent=intent,
+            account_status=channels["account_status"],
+            account_found=channels["account_found"],
+        )
+        response = {
+            "genesys_conversation_id": genesys_conversation_id,
+            "gecx_session_id": gecx_session_id,
+            "aie_session_id": aie_session_id,
+            "request_type": "validate_account",
+            "account_found": channels["account_found"],
+            "phone_available": channels["phone_available"],
+            "phone_type_mobile": channels["phone_type_mobile"],
+            "email_available": channels["email_available"],
+            "account_status": channels["account_status"],
+            "request_status": "Success" if success else "Failure",
+            "request_status_msg": "Account validated" if success else "Member account not found",
+            "response_source": "stub",
+        }
+        return response
+
+    def _build_send_link_response(self, payload: dict[str, Any]) -> dict[str, Any]:
+        genesys_conversation_id = str(payload.get("genesys_conversation_id") or "").strip()
+        gecx_session_id = str(payload.get("gecx_session_id") or "").strip()
+        aie_session_id = str(payload.get("aie_session_id") or "").strip()
+        member_eid = str(payload.get("member_eid") or "").strip()
+        delivery_type = str(payload.get("delivery_type") or "").strip().lower()
+
+        if delivery_type not in {"sms", "email"}:
+            return {
+                "genesys_conversation_id": genesys_conversation_id,
+                "gecx_session_id": gecx_session_id,
+                "aie_session_id": aie_session_id,
+                "request_type": "pw_send_link",
+                "pw_link_sent": False,
+                "request_status": "Failure",
+                "request_status_msg": "Unsupported delivery_type. Use sms or email.",
+                "response_source": "stub",
+            }
+
+        session = self.session_store.load(aie_session_id) if aie_session_id else None
+        if not session or not session.get("active", False):
+            return {
+                "genesys_conversation_id": genesys_conversation_id,
+                "gecx_session_id": gecx_session_id,
+                "aie_session_id": aie_session_id,
+                "request_type": "pw_send_link",
+                "pw_link_sent": False,
+                "request_status": "Failure",
+                "request_status_msg": "No active validation session. Call validate_account first.",
+                "response_source": "stub",
+            }
+
+        api_result = self.api_client.call_send_link_api(payload)
+        if isinstance(api_result, dict):
+            api_result.setdefault("genesys_conversation_id", genesys_conversation_id)
+            api_result.setdefault("gecx_session_id", gecx_session_id)
+            api_result.setdefault("aie_session_id", aie_session_id)
+            api_result.setdefault("request_type", "pw_send_link")
+            api_result.setdefault("request_status", "Success")
+            api_result.setdefault("request_status_msg", "Password reset link sent")
+            return api_result
+
+        success = self._pick_stub_success()
+        session["updated_at"] = datetime.now(timezone.utc).isoformat()
+        session["last_request_type"] = "pw_send_link"
+        session["last_delivery_type"] = delivery_type
+        session["pw_link_sent"] = success
+        session["member_eid"] = member_eid or session.get("member_eid", "")
+        self.session_store.save(aie_session_id, session)
+        return {
+            "genesys_conversation_id": genesys_conversation_id,
+            "gecx_session_id": gecx_session_id,
+            "aie_session_id": aie_session_id,
+            "request_type": "pw_send_link",
+            "pw_link_sent": success,
+            "request_status": "Success" if success else "Failure",
+            "request_status_msg": "Password reset link sent" if success else f"{delivery_type} delivery channel not available",
+            "response_source": "stub",
+        }
+
+    def _build_end_session_response(self, payload: dict[str, Any]) -> dict[str, Any]:
+        genesys_conversation_id = str(payload.get("genesys_conversation_id") or "").strip()
+        gecx_session_id = str(payload.get("gecx_session_id") or "").strip()
+        aie_session_id = str(payload.get("aie_session_id") or "").strip()
+
+        session = self.session_store.load(aie_session_id) if aie_session_id else None
+        if not session:
+            return {
+                "genesys_conversation_id": genesys_conversation_id,
+                "gecx_session_id": gecx_session_id,
+                "aie_session_id": aie_session_id,
+                "request_type": "end_session",
+                "request_status": "Failure",
+                "request_status_msg": "Session not found",
+            }
+
+        session["active"] = False
+        session["updated_at"] = datetime.now(timezone.utc).isoformat()
+        session["last_request_type"] = "end_session"
+        self.session_store.save(aie_session_id, session)
+        return {
+            "genesys_conversation_id": genesys_conversation_id or session.get("genesys_conversation_id", ""),
+            "gecx_session_id": gecx_session_id or session.get("gecx_session_id", ""),
+            "aie_session_id": aie_session_id,
+            "request_status": "Success",
+            "request_status_msg": "Session Ended successfully",
+        }
 
     def handle_request(self, payload: dict[str, Any]) -> dict[str, Any]:
         genesys_conversation_id = str(payload.get("genesys_conversation_id") or "").strip()
@@ -236,48 +479,17 @@ class AccountManagementService:
         self.memory.append(conversation_key, "user", json.dumps(payload, default=str))
 
         if request_type == "validate_account":
-            channels = self._stub_member_channels(member_eid)
-            response = {
-                "genesys_conversation_id": genesys_conversation_id,
-                "gecx_session_id": gecx_session_id,
-                "aie_session_id": aie_session_id,
-                "request_type": "validate_account",
-                "account_found": channels["account_found"],
-                "phone_available": channels["phone_available"],
-                "phone_type_mobile": channels["phone_type_mobile"],
-                "email_available": channels["email_available"],
-                "account_status": channels["account_status"],
-                "request_status": "Success" if channels["account_found"] else "Failure",
-                "request_status_msg": "Account validated" if channels["account_found"] else "Member account not found",
-            }
+            response = self._build_validation_response(payload)
             self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
             return response
 
         if request_type == "pw_send_link":
-            channels = self._member_channel_map.get(member_eid) or self._stub_member_channels(member_eid)
-            if delivery_type not in {"sms", "email"}:
-                response = {
-                    "genesys_conversation_id": genesys_conversation_id,
-                    "gecx_session_id": gecx_session_id,
-                    "aie_session_id": aie_session_id,
-                    "request_type": "pw_send_link",
-                    "pw_link_sent": False,
-                    "request_status": "Failure",
-                    "request_status_msg": "Unsupported delivery_type. Use sms or email.",
-                }
-                self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
-                return response
+            response = self._build_send_link_response(payload)
+            self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
+            return response
 
-            channel_available = channels["phone_available"] if delivery_type == "sms" else channels["email_available"]
-            response = {
-                "genesys_conversation_id": genesys_conversation_id,
-                "gecx_session_id": gecx_session_id,
-                "aie_session_id": aie_session_id,
-                "request_type": "pw_send_link",
-                "pw_link_sent": bool(channel_available),
-                "request_status": "Success" if channel_available else "Failure",
-                "request_status_msg": "Password reset link sent" if channel_available else f"{delivery_type} delivery channel not available",
-            }
+        if request_type == "end_session":
+            response = self._build_end_session_response(payload)
             self.memory.append(conversation_key, "assistant", json.dumps(response, default=str))
             return response
 

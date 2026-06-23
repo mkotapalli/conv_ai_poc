@@ -56,7 +56,9 @@ class Settings:
 class OrchestratorBridge:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.orchestrator_url = self.settings.get("service.orchestrator.url")
+        self.account_agent_url = self.settings.get("service.account_agent.invocations_url") or self.settings.get(
+            "service.orchestrator.url"
+        )
 
     def health(self) -> dict[str, Any]:
         return {
@@ -64,7 +66,7 @@ class OrchestratorBridge:
             "service": self.settings.get("app.name", "acct-mgnt-mcp"),
             "mcp_path": "/mcp",
             "health_path": "/health",
-            "orchestrator_url": self.orchestrator_url,
+            "account_agent_url": self.account_agent_url,
             "runtime_protocol": self.settings.get("service.agentcore.runtime.protocol", "MCP"),
         }
 
@@ -79,8 +81,8 @@ class OrchestratorBridge:
         delivery_type: str | None,
         intent: str | None,
     ) -> dict[str, Any]:
-        if not self.orchestrator_url:
-            raise RuntimeError("Orchestrator URL is missing from configuration.")
+        if not self.account_agent_url:
+            raise RuntimeError("Account-agent URL is missing from configuration.")
 
         normalized_request_type = request_type.strip()
         if not normalized_request_type:
@@ -99,20 +101,20 @@ class OrchestratorBridge:
         timeout_seconds = self.settings.get_int("http.timeout.seconds", 30)
         body = json.dumps(payload).encode("utf-8")
 
-        if "bedrock-agentcore" in self.orchestrator_url:
+        if "bedrock-agentcore" in self.account_agent_url:
             region = self.settings.get("aws.region", os.getenv("AWS_REGION", "us-east-1"))
             session = boto3.Session(region_name=region)
             credentials = session.get_credentials().get_frozen_credentials()
             aws_request = AWSRequest(
                 method="POST",
-                url=self.orchestrator_url,
+                url=self.account_agent_url,
                 data=body,
                 headers=headers,
             )
             SigV4Auth(credentials, "bedrock-agentcore", region).add_auth(aws_request)
             prepped = requests.Request(
                 method="POST",
-                url=self.orchestrator_url,
+                url=self.account_agent_url,
                 headers=dict(aws_request.headers),
                 data=body,
             ).prepare()
@@ -120,7 +122,7 @@ class OrchestratorBridge:
                 response = http_session.send(prepped, timeout=timeout_seconds)
         else:
             response = requests.post(
-                self.orchestrator_url,
+                self.account_agent_url,
                 data=body,
                 headers=headers,
                 timeout=timeout_seconds,
@@ -140,8 +142,8 @@ BRIDGE = OrchestratorBridge(SETTINGS)
 MCP_SERVER = FastMCP(
     name=SETTINGS.get("app.name", "acct-mgnt-mcp"),
     instructions=(
-        "Expose account-management MCP tools for AgentCore Gateway. Use the orchestrator_invoke tool "
-        "to route password-reset, unlock, and general account access requests to orchestrator-agent."
+            "Expose account-management MCP tools for AgentCore Gateway. Use the account_management_invoke tool "
+            "to route password-reset, unlock, and general account access requests directly to acct-mgmt-agent."
     ),
     host="0.0.0.0",
     port=8000,
@@ -155,30 +157,30 @@ MCP_SERVER = FastMCP(
 @MCP_SERVER.resource(
     "account://password-reset",
     name="Password Reset",
-    description="Guidance for password reset requests that should be routed through the orchestrator-agent.",
+    description="Guidance for password reset requests that should be routed directly to the account-management agent.",
     mime_type="application/json",
 )
 def password_reset_resource() -> str:
     return json.dumps({
         "action": "password_reset",
-        "description": "Handles user password reset requests through the orchestrator-agent.",
-        "target": "orchestrator-agent",
-        "tool": "orchestrator_invoke",
+        "description": "Handles user password reset requests through the account-management agent.",
+        "target": "acct-mgmt-agent",
+        "tool": "account_management_invoke",
     })
 
 
 @MCP_SERVER.resource(
     "account://account-unlock",
     name="Account Unlock",
-    description="Guidance for account unlock requests that should be routed through the orchestrator-agent.",
+    description="Guidance for account unlock requests that should be routed directly to the account-management agent.",
     mime_type="application/json",
 )
 def account_unlock_resource() -> str:
     return json.dumps({
         "action": "account_unlock",
-        "description": "Handles account unlock requests through the orchestrator-agent.",
-        "target": "orchestrator-agent",
-        "tool": "orchestrator_invoke",
+        "description": "Handles account unlock requests through the account-management agent.",
+        "target": "acct-mgmt-agent",
+        "tool": "account_management_invoke",
     })
 
 
@@ -210,12 +212,42 @@ def runtime_registration_resource() -> str:
 @MCP_SERVER.tool(
     name="orchestrator_invoke",
     description=(
-        "Forward a user message from AgentCore Gateway to orchestrator-agent "
-        "and return the orchestration result. "
-        "Use this tool for password reset, account unlock, and general account access requests."
+        "Backward-compatible alias that forwards a user message from AgentCore Gateway to the account-management agent. "
+        "Use account_management_invoke for new integrations."
     ),
 )
 def orchestrator_invoke(
+    genesys_conversation_id: Optional[str] = None,
+    gecx_session_id: Optional[str] = None,
+    aie_session_id: Optional[str] = None,
+    request_type: Optional[str] = None,
+    member_eid: Optional[str] = None,
+    delivery_type: Optional[str] = None,
+    intent: Optional[str] = None,
+) -> str:
+    result = BRIDGE.invoke(
+        genesys_conversation_id=(genesys_conversation_id or "").strip(),
+        gecx_session_id=(gecx_session_id or "").strip(),
+        aie_session_id=(aie_session_id or "").strip(),
+        request_type=(request_type or "").strip(),
+        member_eid=(member_eid or "").strip(),
+        delivery_type=(delivery_type or "").strip().lower(),
+        intent=(intent or "").strip(),
+    )
+
+    if isinstance(result, dict):
+        return json.dumps(result)
+    return json.dumps({"request_context": str(result)})
+
+
+@MCP_SERVER.tool(
+    name="account_management_invoke",
+    description=(
+        "Forward a user message directly to acct-mgmt-agent and return the account-management result. "
+        "Use this tool for account validation, password-link delivery, and end-session flows."
+    ),
+)
+def account_management_invoke(
     genesys_conversation_id: Optional[str] = None,
     gecx_session_id: Optional[str] = None,
     aie_session_id: Optional[str] = None,

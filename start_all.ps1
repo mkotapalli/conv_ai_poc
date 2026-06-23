@@ -23,7 +23,7 @@ Write-Host "Starting local services with AWS account '$Account', profile '$awsPr
 
 Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; `$env:SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL='http://localhost:8082/invocations'; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8081 --app-dir src/orchestrator-agent"
 Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8082 --app-dir src/acct-mgmt-agent"
-Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; `$env:SERVICE_ORCHESTRATOR_URL='http://localhost:8081/invocations'; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8083 --app-dir src/acct-mgnt-mcp"
+Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; `$env:SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL='http://localhost:8082/invocations'; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8083 --app-dir src/acct-mgnt-mcp"
 
 Write-Host "Started orchestrator-agent, acct-mgmt-agent, and acct-mgnt-mcp." -ForegroundColor Green
 Write-Host "Use './start_all.ps1 -Account company' for company AWS or './start_all.ps1 -Account personal' for personal AWS." -ForegroundColor Green

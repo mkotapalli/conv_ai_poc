@@ -37,8 +37,9 @@ services:
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_SECRETSMANAGER_ENABLED: ${AWS_SECRETSMANAGER_ENABLED:-true}
       AWS_SECRETSMANAGER_SECRET_NAME: ${AWS_SECRETSMANAGER_SECRET_NAME:-bcbs-dev-convai-secrets}
+      SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL: http://acct-mgmt-agent:8080/invocations
       SERVICE_ORCHESTRATOR_URL: http://orchestrator-agent:8080/orchestrate
     volumes:
       - ${USERPROFILE}/.aws:/root/.aws:ro
     depends_on:
-      - orchestrator-agent
+      - acct-mgmt-agent

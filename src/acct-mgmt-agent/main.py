@@ -65,7 +65,7 @@ AgentRequest.model_rebuild()
 def root() -> dict[str, str]:
     return {
         "service": "acct-mgmt-agent",
-        "message": "Use POST /assist for password reset and unlock responses.",
+        "message": "Use POST /assist for account validation, password-link delivery, and end-session responses.",
     }
 
 
