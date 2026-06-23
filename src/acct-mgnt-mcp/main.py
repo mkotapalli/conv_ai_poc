@@ -53,12 +53,10 @@ class Settings:
             return default
 
 
-class OrchestratorBridge:
+class AccountManagementBridge:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.account_agent_url = self.settings.get("service.account_agent.invocations_url") or self.settings.get(
-            "service.orchestrator.url"
-        )
+        self.account_agent_url = self.settings.get("service.account_agent.invocations_url")
 
     def health(self) -> dict[str, Any]:
         return {
@@ -133,7 +131,7 @@ class OrchestratorBridge:
 
 
 SETTINGS = Settings(CONFIG_PATH)
-BRIDGE = OrchestratorBridge(SETTINGS)
+BRIDGE = AccountManagementBridge(SETTINGS)
 
 # AgentCore Runtime requires:
 #   - host 0.0.0.0, port 8000  (hard-coded by the platform)
@@ -142,8 +140,8 @@ BRIDGE = OrchestratorBridge(SETTINGS)
 MCP_SERVER = FastMCP(
     name=SETTINGS.get("app.name", "acct-mgnt-mcp"),
     instructions=(
-            "Expose account-management MCP tools for AgentCore Gateway. Use the account_management_invoke tool "
-            "to route password-reset, unlock, and general account access requests directly to acct-mgmt-agent."
+                "Expose account-management MCP tools for AgentCore Gateway. Use the account_management_invoke tool "
+                "to route password-reset, unlock, and general account access requests directly to acct-mgmt-agent."
     ),
     host="0.0.0.0",
     port=8000,
@@ -208,37 +206,6 @@ def runtime_registration_resource() -> str:
 # Fix: flatten all parameters to simple scalar/Optional[str] types only.
 # user_context is kept minimal and derived server-side.
 # Return type is str (JSON) instead of dict for the same reason.
-
-@MCP_SERVER.tool(
-    name="orchestrator_invoke",
-    description=(
-        "Backward-compatible alias that forwards a user message from AgentCore Gateway to the account-management agent. "
-        "Use account_management_invoke for new integrations."
-    ),
-)
-def orchestrator_invoke(
-    genesys_conversation_id: Optional[str] = None,
-    gecx_session_id: Optional[str] = None,
-    aie_session_id: Optional[str] = None,
-    request_type: Optional[str] = None,
-    member_eid: Optional[str] = None,
-    delivery_type: Optional[str] = None,
-    intent: Optional[str] = None,
-) -> str:
-    result = BRIDGE.invoke(
-        genesys_conversation_id=(genesys_conversation_id or "").strip(),
-        gecx_session_id=(gecx_session_id or "").strip(),
-        aie_session_id=(aie_session_id or "").strip(),
-        request_type=(request_type or "").strip(),
-        member_eid=(member_eid or "").strip(),
-        delivery_type=(delivery_type or "").strip().lower(),
-        intent=(intent or "").strip(),
-    )
-
-    if isinstance(result, dict):
-        return json.dumps(result)
-    return json.dumps({"request_context": str(result)})
-
 
 @MCP_SERVER.tool(
     name="account_management_invoke",

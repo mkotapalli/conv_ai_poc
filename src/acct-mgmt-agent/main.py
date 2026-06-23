@@ -85,5 +85,5 @@ def assist(payload: AgentRequest) -> dict:
 
 
 @app.post("/invocations")
-def invocations(payload: AgentRequest) -> dict:
+def invocations(payload: AgentRequest) -> dict: 
     return SERVICE.handle_request(payload.model_dump())

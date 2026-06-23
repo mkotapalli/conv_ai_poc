@@ -11,6 +11,8 @@ from typing import Any
 
 import boto3
 import requests
+from bedrock_agentcore.memory.constants import ConversationalMessage, MessageRole
+from bedrock_agentcore.memory.session import MemorySessionManager
 from strands import Agent
 from strands.models import BedrockModel
 
@@ -139,13 +141,23 @@ class AgentCoreMemoryStore:
         self._save()
 
 
-class AccountSessionStore:
-    def __init__(self, storage_path: str) -> None:
+class SessionStateStore:
+    STATE_PREFIX = "STATE::"
+
+    def __init__(self, storage_path: str, provider: str = "local", memory_id: str = "", region: str = "us-east-1") -> None:
+        self.memory_id = memory_id.strip()
+        self.region = region
+        self.provider = "agentcore" if self.memory_id else provider
         self.storage_path = Path(storage_path)
         if not self.storage_path.is_absolute():
             self.storage_path = SERVICE_ROOT / self.storage_path
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        self._sessions = self._load()
+        self._memory = self._load() if not self.uses_agentcore else {}
+        self._manager = MemorySessionManager(memory_id=self.memory_id, region_name=self.region) if self.uses_agentcore else None
+
+    @property
+    def uses_agentcore(self) -> bool:
+        return bool(self.memory_id)
 
     def _load(self) -> dict[str, dict[str, Any]]:
         if not self.storage_path.exists():
@@ -157,20 +169,61 @@ class AccountSessionStore:
             return {}
 
     def _save(self) -> None:
-        self.storage_path.write_text(json.dumps(self._sessions, indent=2), encoding="utf-8")
+        self.storage_path.write_text(json.dumps(self._memory, indent=2), encoding="utf-8")
 
-    def create(self, state: dict[str, Any]) -> str:
-        session_id = str(state.get("aie_session_id") or "").strip() or str(uuid.uuid4())
-        state["aie_session_id"] = session_id
-        self._sessions[session_id] = state
-        self._save()
-        return session_id
+    def _agentcore_session(self, session_id: str):
+        if not self._manager:
+            raise RuntimeError("AgentCore memory manager is not configured")
+        return self._manager.create_memory_session(actor_id=session_id, session_id=session_id)
+
+    @staticmethod
+    def _extract_state_from_event(event: Any) -> dict[str, Any] | None:
+        payload = event.get("payload", []) if hasattr(event, "get") else getattr(event, "payload", [])
+        for payload_item in reversed(payload or []):
+            conversational = payload_item.get("conversational") if isinstance(payload_item, dict) else None
+            if not conversational:
+                continue
+            text = str(conversational.get("content", {}).get("text", ""))
+            if text.startswith(SessionStateStore.STATE_PREFIX):
+                raw_state = text[len(SessionStateStore.STATE_PREFIX) :].strip()
+                try:
+                    state = json.loads(raw_state)
+                except json.JSONDecodeError:
+                    return None
+                return state if isinstance(state, dict) else None
+        return None
 
     def load(self, aie_session_id: str) -> dict[str, Any] | None:
-        return self._sessions.get(aie_session_id)
+        if self.uses_agentcore and self._manager:
+            try:
+                events = self._manager.list_events(
+                    actor_id=aie_session_id,
+                    session_id=aie_session_id,
+                    max_results=100,
+                    include_payload=True,
+                )
+                for event in reversed(events):
+                    state = self._extract_state_from_event(event)
+                    if state is not None:
+                        return state
+            except Exception as exc:
+                LOGGER.exception("Failed to load session state from AgentCore Memory: %s", exc)
+                return None
+
+        return self._memory.get(aie_session_id)
 
     def save(self, aie_session_id: str, state: dict[str, Any]) -> None:
-        self._sessions[aie_session_id] = state
+        if self.uses_agentcore and self._manager:
+            try:
+                session = self._agentcore_session(aie_session_id)
+                payload = f"{self.STATE_PREFIX}{json.dumps(state, sort_keys=True)}"
+                session.add_turns([ConversationalMessage(payload, MessageRole.OTHER)])
+                return
+            except Exception as exc:
+                LOGGER.exception("Failed to persist session state to AgentCore Memory: %s", exc)
+                return
+
+        self._memory[aie_session_id] = state
         self._save()
 
 
@@ -261,8 +314,11 @@ class AccountManagementService:
             storage_path=self.settings.get("memory.storage_path", "data/account-memory.json"),
             provider=self.settings.get("memory.provider", "local"),
         )
-        self.session_store = AccountSessionStore(
+        self.session_store = SessionStateStore(
             storage_path=self.settings.get("session.storage_path", "data/account-sessions.json"),
+            provider=self.settings.get("memory.provider", "local"),
+            memory_id=self.settings.get("memory.agentcore.memory_id", ""),
+            region=self.settings.get("aws.region", "us-east-1"),
         )
         self.api_client = AccountApiClient(self.settings)
         self._rng = random.Random()
@@ -283,6 +339,7 @@ class AccountManagementService:
             "memory_id": self.settings.get("memory.agentcore.memory_id", ""),
             "mode": "stubbed_api",
             "session_store": self.settings.get("session.storage_path", "data/account-sessions.json"),
+            "session_store_backend": self.session_store.provider,
             "account_validation_api_url": self.settings.get("service.api.account_validation_url", ""),
             "send_link_api_url": self.settings.get("service.api.send_link_url", ""),
             "a2a_enabled": str(self.settings.get_bool("service.a2a.enabled", True)).lower(),
@@ -343,6 +400,25 @@ class AccountManagementService:
                 intent=intent,
                 account_status=str(api_result.get("account_status", "")),
                 account_found=bool(api_result.get("account_found", True)),
+            )
+            request_status = str(api_result.get("request_status") or "Success").strip().lower()
+            # Persist the session even when the upstream API generates the session id,
+            # so pw_send_link can resolve the same aie_session_id on the next call.
+            self.session_store.save(
+                aie_session_id,
+                {
+                    "genesys_conversation_id": genesys_conversation_id,
+                    "gecx_session_id": gecx_session_id,
+                    "aie_session_id": aie_session_id,
+                    "member_eid": member_eid,
+                    "intent": intent,
+                    "account_status": str(api_result.get("account_status", "")),
+                    "account_found": bool(api_result.get("account_found", request_status == "success")),
+                    "active": request_status == "success",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "last_request_type": "validate_account",
+                },
             )
             api_result.setdefault("genesys_conversation_id", genesys_conversation_id)
             api_result.setdefault("gecx_session_id", gecx_session_id)

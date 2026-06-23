@@ -1,8 +1,9 @@
-"""Run the full account recovery flow end to end against the orchestrator runtime."""
+"""Run the full account recovery flow end to end against the account-management runtime."""
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import dataclass
 from typing import Any
@@ -21,7 +22,7 @@ except ImportError as exc:  # pragma: no cover
 DEFAULT_RUNTIME_URL = (
     "https://bedrock-agentcore.us-east-1.amazonaws.com"
     "/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2F"
-    "bcbs_dev_convai_orchestrator-GEkw1YGeCY/invocations?qualifier=bcbs_dev_orchestrator_endpoint"
+    "bcbs_dev_convai_acct_mgnt-8xi3SACIES/invocations?qualifier=bcbs_dev_acct_mgmt_endpoint"
 )
 
 
@@ -107,12 +108,17 @@ def print_step(title: str, request_payload: dict[str, Any], response: requests.R
         return {}
 
 
+def status_is_success(payload: dict[str, Any]) -> bool:
+    return str(payload.get("request_status") or "").strip().lower() == "success"
+
+
 def run(args: argparse.Namespace) -> int:
-    if not args.url:
+    runtime_url = (args.url or os.getenv("E2E_RUNTIME_URL", "")).strip()
+    if not runtime_url:
         print("ERROR: Missing --url (or E2E_RUNTIME_URL env var).")
         return 2
 
-    use_sigv4 = infer_sigv4(args.url, args.sigv4)
+    use_sigv4 = infer_sigv4(runtime_url, args.sigv4)
     flow_ids = FlowIds(
         genesys_conversation_id=args.genesys_conversation_id,
         gecx_session_id=args.gecx_session_id,
@@ -120,7 +126,7 @@ def run(args: argparse.Namespace) -> int:
         intent=args.intent,
     )
 
-    print(f"Runtime URL : {args.url}")
+    print(f"Runtime URL : {runtime_url}")
     print(f"Use SigV4   : {use_sigv4}")
     print(f"Region      : {args.region}")
     print(f"Profile     : {args.profile or '<default>'}")
@@ -134,7 +140,7 @@ def run(args: argparse.Namespace) -> int:
         "intent": flow_ids.intent,
     }
     validate_response = post_json(
-        url=args.url,
+        url=runtime_url,
         payload=validate_payload,
         timeout_seconds=args.timeout,
         region=args.region,
@@ -150,6 +156,15 @@ def run(args: argparse.Namespace) -> int:
         print("\nFAIL: validate_account did not return aie_session_id.")
         return 1
 
+    if not status_is_success(validate_result):
+        print(
+            "\nFAIL: validate_account returned request_status != Success. "
+            "Skipping pw_send_link because the session may not be valid."
+        )
+        print(f"request_status: {validate_result.get('request_status', '<missing>')}")
+        print(f"request_status_msg: {validate_result.get('request_status_msg', '<missing>')}")
+        return 1
+
     link_payload = {
         "genesys_conversation_id": flow_ids.genesys_conversation_id,
         "gecx_session_id": flow_ids.gecx_session_id,
@@ -160,7 +175,7 @@ def run(args: argparse.Namespace) -> int:
         "intent": flow_ids.intent,
     }
     link_response = post_json(
-        url=args.url,
+        url=runtime_url,
         payload=link_payload,
         timeout_seconds=args.timeout,
         region=args.region,
@@ -171,6 +186,14 @@ def run(args: argparse.Namespace) -> int:
     if link_response.status_code != 200:
         return 1
 
+    link_status_msg = str(link_result.get("request_status_msg") or "").strip()
+    if link_status_msg == "No active session. Call validate_account first.":
+        print(
+            "\nFAIL: Response came from the legacy orchestrator path (old message text detected).\n"
+            "Update the runtime URL to acct-mgmt-agent and confirm MCP uses SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL."
+        )
+        return 1
+
     end_payload = {
         "genesys_conversation_id": flow_ids.genesys_conversation_id,
         "gecx_session_id": flow_ids.gecx_session_id,
@@ -178,7 +201,7 @@ def run(args: argparse.Namespace) -> int:
         "request_type": "end_session",
     }
     end_response = post_json(
-        url=args.url,
+        url=runtime_url,
         payload=end_payload,
         timeout_seconds=args.timeout,
         region=args.region,
@@ -199,7 +222,11 @@ def run(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the account recovery flow end to end.")
-    parser.add_argument("--url", default=DEFAULT_RUNTIME_URL, help="Orchestrator runtime URL.")
+    parser.add_argument(
+        "--url",
+        default=DEFAULT_RUNTIME_URL,
+        help="Account-management runtime URL. If omitted, falls back to E2E_RUNTIME_URL.",
+    )
     parser.add_argument("--region", default="us-east-1", help="AWS region.")
     parser.add_argument("--profile", default=None, help="AWS CLI profile name (optional).")
     parser.add_argument("--timeout", type=int, default=120, help="Request timeout in seconds.")

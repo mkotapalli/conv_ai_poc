@@ -1,6 +1,6 @@
 # Account Management MCP Server
 
-The MCP (Model Context Protocol) server bridges AWS AgentCore Gateway to the orchestrator agent by exposing a standards-based MCP tool surface over HTTP. It uses the Python `mcp` server implementation and is packaged so it can run as an ARM64 AgentCore Runtime container.
+The MCP (Model Context Protocol) server bridges AWS AgentCore Gateway directly to the account-management agent by exposing a standards-based MCP tool surface over HTTP. It uses the Python `mcp` server implementation and is packaged so it can run as an ARM64 AgentCore Runtime container.
 
 ## Architecture
 
@@ -20,7 +20,6 @@ AWS AgentCore Gateway
 
 ### Tools
 - **account_management_invoke** - Forward a user message from AgentCore Gateway directly to `acct-mgmt-agent`
-- **orchestrator_invoke** - Backward-compatible alias for `account_management_invoke`
 
 ## Configuration
 
@@ -29,7 +28,7 @@ See [config/application.properties](config/application.properties) for all setti
 | Setting | Default | Purpose |
 |---------|---------|---------|
 | `server.port` | 8083 | MCP server listen port |
-| `service.orchestrator.url` | `http://localhost:8081/orchestrate` | Orchestrator endpoint |
+| `service.account_agent.invocations_url` | `http://localhost:8082/invocations` | Account-management agent endpoint |
 | `service.agentcore.runtime.mcp_path` | `/mcp` | AgentCore Runtime MCP endpoint path |
 | `aws.secretsmanager.enabled` | true | Load AWS credentials from Secrets Manager |
 
@@ -79,7 +78,7 @@ curl -X POST http://localhost:8083/mcp \
   }'
 ```
 
-**Invoke Orchestrator:**
+**Invoke Account Management:**
 ```bash
 curl -X POST http://localhost:8083/mcp \
   -H "Content-Type: application/json" \
@@ -149,7 +148,7 @@ Example CLI payload for runtime creation:
 ```json
 {
   "agentRuntimeName": "acct-mgnt-mcp",
-  "description": "MCP bridge from AgentCore Gateway to orchestrator-agent",
+  "description": "MCP bridge from AgentCore Gateway to acct-mgmt-agent",
   "agentRuntimeArtifact": {
     "containerConfiguration": {
       "containerUri": "834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc:acct-mgnt-mcp-v1"
@@ -168,7 +167,7 @@ Example CLI payload for runtime creation:
   },
   "environmentVariables": {
     "AWS_REGION": "us-east-1",
-    "SERVICE_ORCHESTRATOR_URL": "http://orchestrator-agent.internal/orchestrate",
+    "SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL": "http://acct-mgmt-agent.internal/invocations",
     "SERVICE_AGENTCORE_RUNTIME_MCP_PATH": "/mcp"
   }
 }
@@ -204,13 +203,12 @@ To register this MCP server as a tool server in AgentCore Gateway:
 1. Deploy the container as an AgentCore Runtime and create its runtime endpoint.
 2. In AgentCore Gateway, create a new MCP integration that points at the runtime endpoint URL.
 3. Configure the integration to use the runtime MCP path `/mcp`.
-4. Expose the `orchestrator_invoke` tool to the gateway workflow.
-4. Expose the `account_management_invoke` tool to the gateway workflow. The legacy `orchestrator_invoke` alias remains available for compatibility.
+4. Expose the `account_management_invoke` tool to the gateway workflow.
 
 ## Files
 
 - `main.py` - ASGI entry point for the MCP runtime
-- `acct_mgnt_mcp/service.py` - FastMCP server and orchestrator bridge
+- `acct_mgnt_mcp/service.py` - FastMCP server and account-management bridge
 - `config/application.properties` - Configuration
 - `requirements.txt` - Python dependencies
 - `Dockerfile` - Container image definition
