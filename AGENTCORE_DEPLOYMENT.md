@@ -9,10 +9,7 @@ Client (LLM / GCP / Portal)
 AgentCore Gateway (Okta-protected, MCP)
    │  SigV4
    ▼
-acct-mgnt-mcp Runtime  (MCP server, port 8000)
-  │  SigV4  SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL
-   ▼
-acct-mgmt-agent Runtime  (HTTP /invocations, port 8080)
+acct-mgmt-agent Runtime  (REST on 8080, MCP on 8000)
 ```
 
 Runtime-to-runtime communication uses SigV4-signed HTTPS to the AgentCore
@@ -24,7 +21,6 @@ invocations endpoint. No VPC networking is required.
 
 | Component | Runtime ID | Role suffix |
 |---|---|---|
-| MCP | `bcbs_dev_convai_mcp-Vt2A72DKeq` | `-zix3c` |
 | Orchestrator | `bcbs_dev_convai_orchestrator-GEkw1YGeCY` | `-kugos` |
 | Acct-mgmt | `bcbs_dev_convai_acct_mgnt-8xi3SACIES` | *(separate role)* |
 
@@ -49,7 +45,6 @@ ECR images produced:
 |---|---|
 | `orchestrator-agent-latest` | orchestrator-agent |
 | `acct-mgmt-agent-latest` | acct-mgmt-agent |
-| `acct-mgnt-mcp-latest` | acct-mgnt-mcp |
 
 ECR registry: `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_management_svc`
 
@@ -59,7 +54,7 @@ ECR registry: `834458830002.dkr.ecr.us-east-1.amazonaws.com/aie_account_manageme
 
 | Field | Value |
 |---|---|
-| Protocol | `HTTP` |
+| Protocol | `HTTP` and `MCP` listeners in same image |
 | Port | `8080` |
 | Image | `...:acct-mgmt-agent-latest` |
 
@@ -70,10 +65,13 @@ AWS_REGION=us-east-1
 AWS_SECRETSMANAGER_ENABLED=true
 AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets
 MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d
+MCP_SERVER_PORT=8000
+SERVER_PORT=8080
 ```
 
 - No downstream runtime calls — does not need `InvokeRuntime` permission.
-- Exposes `POST /invocations` and `POST /assist`.
+- Exposes `POST /invocations` and `POST /assist` on 8080.
+- Exposes MCP streamable HTTP on `/mcp` at 8000.
 
 ---
 
@@ -100,26 +98,10 @@ SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL=https://bedrock-agentcore.us-east-1.amazon
 
 ---
 
-## 4. Create / Update Runtime: acct-mgnt-mcp
+## 4. Gateway MCP target
 
-| Field | Value |
-|---|---|
-| Protocol | `MCP` |
-| Port | `8000` |
-| Image | `...:acct-mgnt-mcp-latest` |
-
-Environment variables:
-
-```
-AWS_REGION=us-east-1
-AWS_SECRETSMANAGER_ENABLED=true
-AWS_SECRETSMANAGER_SECRET_NAME=bcbs-dev-convai-secrets
-MEMORY_AGENTCORE_MEMORY_ID=bcbs_dev_convai_memory-KBvo716q7d
-SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL=https://bedrock-agentcore.us-east-1.amazonaws.com/runtimes/arn%3Aaws%3Abedrock-agentcore%3Aus-east-1%3A834458830002%3Aruntime%2Fbcbs_dev_convai_acct_mgnt-8xi3SACIES/invocations?qualifier=bcbs_dev_acct_mgmt_endpoint
-```
-
-- `SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL` must be the fully URL-encoded AgentCore invocations URL for acct-mgmt-agent.
-- Exposes `/mcp` (MCP streamable HTTP).
+- Point the gateway MCP integration directly to the acct-mgmt-agent MCP endpoint (port 8000, path `/mcp`).
+- No standalone `acct-mgnt-mcp` runtime is required.
 
 ---
 
@@ -132,18 +114,11 @@ Summary of inline policies to add:
 
 | Role (suffix) | Policy name | Allows |
 |---|---|---|
-| `-zix3c` (MCP) | `AllowInvokeAcctRuntime` | `InvokeRuntime` on acct-mgmt ARN |
 | `-kugos` (Orchestrator) | `AllowInvokeAcctRuntime` | `InvokeRuntime` on acct-mgmt ARN |
 
 Apply:
 
 ```powershell
-# MCP role -> acct-mgmt
-aws iam put-role-policy `
-  --role-name "AmazonBedrockAgentCoreRuntimeDefaultServiceRole-zix3c" `
-  --policy-name "AllowInvokeAcctRuntime" `
-  --policy-document file://iam/allow-invoke-acct.json
-
 # Orchestrator role -> acct-mgmt
 aws iam put-role-policy `
   --role-name "AmazonBedrockAgentCoreRuntimeDefaultServiceRole-kugos" `
@@ -222,7 +197,7 @@ Service ports:
 |---|---|
 | acct-mgmt-agent | 8082 |
 | orchestrator-agent | 8081 |
-| acct-mgnt-mcp | 8083 |
+| acct-mgmt-agent (MCP) | 8083 |
 
 Run MCP tests locally:
 
@@ -238,7 +213,6 @@ python tests\request_mcp_direct.py --url http://localhost:8083/mcp --call-sample
 | Symptom | Cause | Fix |
 |---|---|---|
 | `403 Forbidden` from AgentCore invocations URL | Missing `InvokeRuntime` IAM permission | Add inline policy per section 5 |
-| `NameResolutionError` on `bedrock-agentcore-runtime.us-east-1.amazonaws.com` | Wrong `SERVICE_ORCHESTRATOR_URL` hostname | Update env var to `bedrock-agentcore.us-east-1.amazonaws.com/runtimes/...` |
 | `424` from AgentCore | Container returned non-2xx (missing `/invocations` route or health probe failure) | Verify `/ping` and `/invocations` routes exist; check container logs |
 | `status: skipped` in orchestrator response | `SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL` env var not set on orchestrator runtime | Set env var in AgentCore console and restart runtime |
 | `status: degraded` in orchestrator response | Acct-mgmt runtime unreachable or returned error | Check acct-mgmt runtime health and IAM permissions |

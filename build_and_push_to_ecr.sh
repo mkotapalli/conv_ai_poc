@@ -88,7 +88,6 @@ ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 SERVICES=(
     "orchestrator-agent:src/orchestrator-agent"
     "acct-mgmt-agent:src/acct-mgmt-agent"
-    "acct-mgnt-mcp:src/acct-mgnt-mcp"
 )
 
 echo "Building and pushing individual images to ECR"

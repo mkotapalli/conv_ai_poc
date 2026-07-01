@@ -22,9 +22,9 @@ if ($env:AWS_SESSION_TOKEN) { $bootstrap += " `$env:AWS_SESSION_TOKEN='$($env:AW
 Write-Host "Starting local services with AWS account '$Account', profile '$awsProfile', region '$Region'." -ForegroundColor Cyan
 
 Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; `$env:SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL='http://localhost:8082/invocations'; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8081 --app-dir src/orchestrator-agent"
-Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8082 --app-dir src/acct-mgmt-agent"
-Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai; `$env:SERVICE_ACCOUNT_AGENT_INVOCATIONS_URL='http://localhost:8082/invocations'; c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8083 --app-dir src/acct-mgnt-mcp"
+Start-Process powershell -ArgumentList '-NoExit', '-Command', "$bootstrap cd c:\projects\gen_agent_ai\src\acct-mgmt-agent; `$env:SERVER_PORT='8082'; `$env:MCP_SERVER_PORT='8083'; c:/projects/gen_agent_ai/.venv/Scripts/python.exe dual_server.py"
 
-Write-Host "Started orchestrator-agent, acct-mgmt-agent, and acct-mgnt-mcp." -ForegroundColor Green
+Write-Host "Started orchestrator-agent and merged acct-mgmt-agent (REST + MCP)." -ForegroundColor Green
 Write-Host "Use './start_all.ps1 -Account company' for company AWS or './start_all.ps1 -Account personal' for personal AWS." -ForegroundColor Green
+Write-Host "REST Agent: http://localhost:8082/health" -ForegroundColor Yellow
 Write-Host "MCP Server: http://localhost:8083/health" -ForegroundColor Yellow

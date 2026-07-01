@@ -1,10 +1,9 @@
 # AgentCore POC for Account Access
 
-This repository contains a **3-service FastAPI proof of concept** for account recovery with stubbed API behavior:
+This repository contains a **2-service FastAPI proof of concept** for account recovery with stubbed API behavior:
 
 - `src/orchestrator-agent` – legacy routing layer for compatibility and session handoff.
-- `src/acct-mgmt-agent` – owns `aie_session_id`, returns stubbed account validation and password-link responses, and exposes easy API adapter hooks.
-- `src/acct-mgnt-mcp` – MCP (Model Context Protocol) server that bridges AgentCore Gateway directly to acct-mgmt-agent.
+- `src/acct-mgmt-agent` – owns `aie_session_id`, returns stubbed account validation and password-link responses, exposes REST endpoints, and also hosts MCP on a second port.
 
 ## Supported request types
 
@@ -29,10 +28,10 @@ Expected key fields are:
 docker compose up --build
 ```
 
-Starts 3 services:
+Starts 2 services:
 - Orchestrator: http://localhost:8081
-- Account Agent: http://localhost:8082
-- MCP Server: http://localhost:8083
+- Account Agent REST: http://localhost:8082
+- Account Agent MCP: http://localhost:8083
 
 ### 2. Or run the services manually
 
@@ -44,8 +43,7 @@ Use the startup script with account selection:
 Or run individually:
 ```bash
 c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8081 --app-dir src/orchestrator-agent
-c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8082 --app-dir src/acct-mgmt-agent
-c:/projects/gen_agent_ai/.venv/Scripts/python.exe -m uvicorn main:app --host 0.0.0.0 --port 8083 --app-dir src/acct-mgnt-mcp
+c:/projects/gen_agent_ai/.venv/Scripts/python.exe src/acct-mgmt-agent/dual_server.py
 ```
 
 ### 3. Smoke test
@@ -57,6 +55,6 @@ c:/projects/gen_agent_ai/.venv/Scripts/python.exe smoke_test.py
 ## Deployment notes
 
 - Update each `config/application.properties` file with your AWS region, secrets manager settings, and service URLs.
-- For production, place `orchestrator-agent` and `acct-mgnt-mcp` behind API Gateway / ALB and enforce IAM authentication at the UI/gateway layer.
+- For production, place `orchestrator-agent` and `acct-mgmt-agent` behind API Gateway / ALB and enforce IAM authentication at the UI/gateway layer.
 - From a Linux bastion host, build and push images with `./build_and_push_to_ecr.sh --image-tag latest`.
 - Session state is persisted by orchestrator under local data storage and keyed by `gecx_session_id`.

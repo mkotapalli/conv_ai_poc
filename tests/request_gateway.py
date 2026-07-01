@@ -12,7 +12,7 @@ try:
     from mcp.client.streamable_http import streamablehttp_client
 except ImportError as exc:  # pragma: no cover
     raise SystemExit(
-        "Missing dependency 'mcp'. Install project requirements first (pip install -r src/acct-mgnt-mcp/requirements.txt)."
+        "Missing dependency 'mcp'. Install project requirements first (pip install -r src/acct-mgmt-agent/requirements.txt)."
     ) from exc
 
 
