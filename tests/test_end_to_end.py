@@ -79,7 +79,7 @@ def post_json(
     body = json.dumps(payload).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
-        "Accept": "application/json",
+        "Accept": "application/json, text/event-stream",
     }
     signed_headers = sign_headers_if_needed(
         url=url,

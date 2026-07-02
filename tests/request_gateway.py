@@ -25,6 +25,7 @@ def build_sample_tool_args(request_type: str) -> dict[str, str]:
     return {
         "genesys_conversation_id": "7a833b7d-5747-407a-a9c9-5781aea9539f",
         "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
+        "aie_session_id": "98192374-1234-1234-1234-123456789012",
         "request_type": request_type,
         "member_eid": "70400040700130465465",
         "delivery_type": "sms",
@@ -37,12 +38,14 @@ def build_headers(token_env: str, api_key_env: str) -> dict[str, str]:
 
     bearer_token = os.getenv(token_env, "").strip()
     api_key = os.getenv(api_key_env, "").strip()
-
+    headers["Content-Type"] = "application/json"
+    headers["Accept"] = f'["application/json", "text/event-stream"]'
     if bearer_token:
         headers["Authorization"] = f"Bearer {bearer_token}"
+
     if api_key:
         headers["x-api-key"] = api_key
-
+    print(headers)
     return headers
 
 
@@ -54,6 +57,16 @@ def _safe_get(result: Any, key: str, default: Any) -> Any:
     return default
 
 
+def _extract_text_content(content: list[Any]) -> list[str]:
+    texts: list[str] = []
+    for item in content:
+        if hasattr(item, "text") and getattr(item, "text"):
+            texts.append(str(getattr(item, "text")))
+        else:
+            texts.append(str(item))
+    return texts
+
+
 async def run_test(
     url: str,
     timeout_seconds: int,
@@ -62,6 +75,7 @@ async def run_test(
     skip_resources: bool,
     call_sample: bool,
     sample_request_type: str,
+    tool_name: str | None,
 ) -> int:
     headers = build_headers(token_env=token_env, api_key_env=api_key_env)
 
@@ -93,6 +107,13 @@ async def run_test(
                     tool_name = _safe_get(tool, "name", "<unnamed>")
                     print(f"    - {tool_name}")
 
+                selected_tool = tool_name
+                if not selected_tool:
+                    selected_tool = _safe_get(tools[0], "name", "") if tools else ""
+                if call_sample and not selected_tool:
+                    print("\nFAIL: No tools available to call.")
+                    return 1
+
                 if not skip_resources:
                     print("\n[3/3] list_resources()")
                     resources_result = await session.list_resources()
@@ -103,19 +124,25 @@ async def run_test(
                         print(f"    - {uri}")
 
                 if call_sample:
-                    print("\n[4/4] call_tool('bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke') sample request")
+                    print(f"\n[4/4] call_tool('{selected_tool}') sample request")
                     tool_args = build_sample_tool_args(sample_request_type)
-                    call_result = await session.call_tool("bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke", arguments=tool_args)
+                    call_result = await session.call_tool(str(selected_tool), arguments=tool_args)
                     content = _safe_get(call_result, "content", [])
                     print("  Request:")
                     print(json.dumps(tool_args, indent=2))
                     print("  Response content:")
                     if content:
-                        for item in content:
-                            if hasattr(item, "text") and getattr(item, "text"):
-                                print(getattr(item, "text"))
-                            else:
-                                print(item)
+                        response_texts = _extract_text_content(content)
+                        for text in response_texts:
+                            print(text)
+
+                        if any(text.startswith("Client error:") for text in response_texts):
+                            print("\nFAIL: Gateway tool call returned a client error.")
+                            print(
+                                "Hint: If this error mentions MCP Accept headers, your gateway target is likely "
+                                "mixing OpenAPI and MCP protocol expectations."
+                            )
+                            return 1
                     else:
                         print(call_result)
 
@@ -157,6 +184,11 @@ def parse_args() -> argparse.Namespace:
         choices=["validate_account", "pw_send_link", "end_session"],
         help="request_type value used for --call-sample.",
     )
+    parser.add_argument(
+        "--tool-name",
+        default=None,
+        help="Explicit tool name to call for --call-sample. Defaults to first discovered tool.",
+    )
     return parser.parse_args()
 
 
@@ -171,6 +203,7 @@ def main() -> int:
             skip_resources=args.skip_resources,
             call_sample=args.call_sample,
             sample_request_type=args.sample_request_type,
+            tool_name=args.tool_name,
         )
     )
 
