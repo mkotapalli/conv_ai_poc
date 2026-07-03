@@ -17,7 +17,7 @@ except ImportError as exc:  # pragma: no cover
 
 
 DEFAULT_GATEWAY_URL = (
-    "https://bcbs-dev-convai-gateway-e4ing1lwcu.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
+    "https://bcbs-dev-convai-test-gateway-qd9mqjdxiq.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp"
 )
 
 
@@ -27,6 +27,7 @@ def build_sample_tool_args(request_type: str) -> dict[str, str]:
         "gecx_session_id": "e97b4552-a8bc-4c0a-a3d1-5029c1a5f217",
         "request_type": request_type,
         "member_eid": "70400040700130465465",
+        "aie_session_id": "sample-aie-session-id",
         "delivery_type": "sms",
         "intent": "Account_Unlock_PW_Reset",
     }
@@ -103,9 +104,9 @@ async def run_test(
                         print(f"    - {uri}")
 
                 if call_sample:
-                    print("\n[4/4] call_tool('bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke') sample request")
+                    print("\n[4/4] call_tool('bcbs-mcp-target___account_management_invoke') sample request")
                     tool_args = build_sample_tool_args(sample_request_type)
-                    call_result = await session.call_tool("bcbs-dev-acct-mgmt-gtwy-mcp-target___orchestrator_invoke", arguments=tool_args)
+                    call_result = await session.call_tool("target-quick-start-t7zwmf___lookupAccountByName", arguments=tool_args)
                     content = _safe_get(call_result, "content", [])
                     print("  Request:")
                     print(json.dumps(tool_args, indent=2))
